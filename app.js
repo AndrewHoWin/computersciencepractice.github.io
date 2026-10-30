@@ -1,6 +1,6 @@
 /**
- * CCF GESP C++ 三级刷题系统核心逻辑
- * 结构：首页（3个大区按钮） -> 小区列表（点击立即开刷） -> 刷题页（随时退出 / 仅当次错题死磕直到全对）
+ * CCF GESP C++ 三级真题练习系统核心逻辑
+ * 结构：首页（3个大区按钮） -> 小区列表（点击开始答题） -> 答题页（随时退出 / 当次错题重练直到全对）
  */
 
 window.GESP_QUESTIONS = window.GESP_QUESTIONS || [];
@@ -25,34 +25,34 @@ const PAPERS_CONFIG = [
 
 // 第二大区：按年份合集小区配置
 const YEARS_CONFIG = [
-    { year: "2023", mode: "all", badge: "2023全集（75题）", title: "2023年 全部真题大卷", desc: "合并2023年全部3套真题（共75题），一次性刷透2023年！" },
-    { year: "2024", mode: "all", badge: "2024全集（100题）", title: "2024年 全部真题大卷", desc: "合并2024年3月、6月、9月、12月全部4套真题（共100题）！" },
-    { year: "2025", mode: "all", badge: "2025全集（100题）", title: "2025年 全部真题大卷", desc: "合并2025年3月、6月、9月、12月全部4套真题（共100题）！" },
-    { year: "2026", mode: "all", badge: "2026全集（75题）", title: "2026年 全部真题大卷", desc: "合并2026年3月、6月、9月全部3套真题（共75题）！" },
-    { year: "2023", mode: "sample25", badge: "2023抽卷（25题）", title: "2023年 随机抽1套标准卷", desc: "从2023年题库随机抽15道单选+10道判断组卷" },
-    { year: "2024", mode: "sample25", badge: "2024抽卷（25题）", title: "2024年 随机抽1套标准卷", desc: "从2024年题库随机抽15道单选+10道判断组卷" },
-    { year: "2025", mode: "sample25", badge: "2025抽卷（25题）", title: "2025年 随机抽1套标准卷", desc: "从2025年题库随机抽15道单选+10道判断组卷" },
-    { year: "2026", mode: "sample25", badge: "2026抽卷（25题）", title: "2026年 随机抽1套标准卷", desc: "从2026年题库随机抽15道单选+10道判断组卷" }
+    { year: "2023", mode: "all", badge: "2023全集（75题）", title: "2023年 全部真题合集", desc: "包含2023年全部3套真题（共75题）" },
+    { year: "2024", mode: "all", badge: "2024全集（100题）", title: "2024年 全部真题合集", desc: "包含2024年3月、6月、9月、12月全部4套真题（共100题）" },
+    { year: "2025", mode: "all", badge: "2025全集（100题）", title: "2025年 全部真题合集", desc: "包含2025年3月、6月、9月、12月全部4套真题（共100题）" },
+    { year: "2026", mode: "all", badge: "2026全集（75题）", title: "2026年 全部真题合集", desc: "包含2026年3月、6月、9月全部3套真题（共75题）" },
+    { year: "2023", mode: "sample25", badge: "2023抽卷（25题）", title: "2023年 随机抽取标准卷", desc: "从2023年题库随机抽取15道单选 + 10道判断" },
+    { year: "2024", mode: "sample25", badge: "2024抽卷（25题）", title: "2024年 随机抽取标准卷", desc: "从2024年题库随机抽取15道单选 + 10道判断" },
+    { year: "2025", mode: "sample25", badge: "2025抽卷（25题）", title: "2025年 随机抽取标准卷", desc: "从2025年题库随机抽取15道单选 + 10道判断" },
+    { year: "2026", mode: "sample25", badge: "2026抽卷（25题）", title: "2026年 随机抽取标准卷", desc: "从2026年题库随机抽取15道单选 + 10道判断" }
 ];
 
 // 第三大区：14套全库综合小区配置
 const COMP_CONFIG = [
-    { mode: "all350", badge: "全库大通关 · 350题", title: "14套真题全库大综合（全部350题）", desc: "将14套试卷全部350道真题彻底打乱混在一起，支持错题无限重做直到全对！" },
-    { mode: "standard25", badge: "全真模拟 · 25题", title: "全库随机抽1套标准卷（25题）", desc: "从350题中随机抽 15道单选 + 10道判断，严格贴合正式考试题量！" },
-    { mode: "fast50", badge: "强化特训 · 50题", title: "全库随机混抽 50 题特训", desc: "从14套卷中随机抽取 50 道真题进行中等强度综合演练！" },
-    { mode: "mega100", badge: "百题冲刺 · 100题", title: "全库随机混抽 100 题百题斩", desc: "从14套卷中随机抽取 100 道真题，考前高强度查漏补缺！" }
+    { mode: "all350", badge: "全库综合 · 350题", title: "14套真题全库综合练习（全部350题）", desc: "将14套试卷全部350道真题混合排列，支持当次错题专项重练。" },
+    { mode: "standard25", badge: "模拟标准卷 · 25题", title: "全库随机抽取标准卷（25题）", desc: "从350题中随机抽取 15道单选 + 10道判断，贴合正式考试题量。" },
+    { mode: "fast50", badge: "综合练习 · 50题", title: "全库随机抽取 50 题练习", desc: "从14套试卷中随机抽取 50 道真题进行综合演练。" },
+    { mode: "mega100", badge: "综合练习 · 100题", title: "全库随机抽取 100 题练习", desc: "从14套试卷中随机抽取 100 道真题进行强化巩固。" }
 ];
 
 class GESPSystem {
     constructor() {
-        this.currentMajorZone = null; // 'zone1' | 'zone2' | 'zone3'
+        this.currentMajorZone = null;
         this.quizTitle = "";
         this.round = 1;
-        this.activeQuestions = []; // 当轮题目（含随机后的选项）
-        this.userAnswers = {};     // 当轮作答记录
+        this.activeQuestions = [];
+        this.userAnswers = {};
         this.currentIndex = 0;
-        this.roundResults = [];    // 当轮批改结果
-        this.wrongQueue = [];      // 仅用于当次刷题下一轮重做的错题队列（退出即销毁）
+        this.roundResults = [];
+        this.wrongQueue = [];
 
         this.init();
     }
@@ -68,14 +68,12 @@ class GESPSystem {
             badge.style.color = "#dc2626";
         }
 
-        // 绑定“边做边看解析”开关
         document.getElementById("instantShowExp").addEventListener("change", () => {
             if (document.getElementById("quizView").classList.contains("active")) {
                 this.renderQuestion();
             }
         });
 
-        // 键盘快捷键（1-4选答案，左右方向键切题）
         window.addEventListener("keydown", (e) => {
             if (!document.getElementById("quizView").classList.contains("active")) return;
             if (e.key === "ArrowLeft") {
@@ -92,14 +90,12 @@ class GESPSystem {
         });
     }
 
-    // 切换页面视图
     switchView(viewId) {
         document.querySelectorAll(".view-page").forEach(el => el.classList.remove("active"));
         document.getElementById(viewId).classList.add("active");
         window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
-    // 洗牌算法（确保每次题目和选项顺序真随机）
     shuffle(arr) {
         const copy = [...arr];
         for (let i = copy.length - 1; i > 0; i--) {
@@ -109,7 +105,6 @@ class GESPSystem {
         return copy;
     }
 
-    // HTML安全转义
     escapeHtml(str) {
         if (str === null || str === undefined) return "";
         return String(str)
@@ -120,7 +115,32 @@ class GESPSystem {
             .replace(/'/g, "&#039;");
     }
 
-    // 渲染带行号、严格保留4格缩进与空行的代码块
+    // 自动净化解析文字，移除不恰当的标签与口语化表达
+    cleanExplanation(rawText) {
+        if (!rawText) return "";
+        return String(rawText)
+            .replace(/【零基础保姆级解析】\s*/g, "")
+            .replace(/零基础保姆级/g, "")
+            .replace(/保姆级/g, "")
+            .replace(/这道题有个超简单的偷懒办法：/g, "本题可以使用如下简便方法：")
+            .replace(/最傻瓜的/g, "直接的")
+            .replace(/“偷懒短路”/g, "“短路求值”")
+            .replace(/小心出题老师的障眼法！/g, "注意审题细节：")
+            .replace(/别被“统计词数”的题目文字骗了，我们要看代码实际在干什么：/g, "结合代码实际运行逻辑分析：")
+            .replace(/千万别掉进陷阱里！/g, "注意初始值设置：")
+            .replace(/又是一道经典的“初值陷阱题”！/g, "注意变量的初始值：")
+            .replace(/这位可爱的同学/g, "该程序")
+            .replace(/睁大眼睛看|睜大眼睛看/g, "注意观察")
+            .replace(/直接被咔嚓切掉了/g, "会被直接截断舍弃")
+            .replace(/像找茬游戏一样/g, "逐项")
+            .replace(/掰着手指头/g, "依次")
+            .replace(/张冠李戴啦！/g, "注意区分概念：")
+            .replace(/说反啦！|说反了！/g, "表述相反。")
+            .replace(/立刻秒答：/g, "可直接得出：")
+            .replace(/秒杀|秒选/g, "快速得出")
+            .trim();
+    }
+
     renderCode(codeStr) {
         if (!codeStr) return "";
         const lines = String(codeStr).replace(/\r\n/g, "\n").split("\n");
@@ -130,12 +150,12 @@ class GESPSystem {
         return `<div class="code-box">${html}</div>`;
     }
 
-    // ==================== 第一层 & 第二层导航：三大区与小区列表 ====================
+    // ==================== 第一层 & 第二层导航 ====================
 
     handleNavHome() {
         if (document.getElementById("quizView").classList.contains("active") ||
             document.getElementById("resultView").classList.contains("active")) {
-            if (!confirm("确定要退出当前刷题返回首页吗？（退出后当次刷题进度与错题将清空）")) {
+            if (!confirm("确定要退出当前练习返回首页吗？（退出后当次练习进度与错题记录将清空）")) {
                 return;
             }
             this.clearSessionData();
@@ -148,7 +168,6 @@ class GESPSystem {
         this.switchView("homeView");
     }
 
-    // 点击三大区按钮进入对应的小区选择页
     openMajorZone(zoneKey) {
         this.currentMajorZone = zoneKey;
         const tagEl = document.getElementById("subZoneTag");
@@ -157,9 +176,9 @@ class GESPSystem {
         const gridEl = document.getElementById("subZoneGrid");
 
         if (zoneKey === "zone1") {
-            tagEl.textContent = "第一大区 · 单卷真题";
-            titleEl.textContent = "选择要刷的真题试卷（共 14 个小区）";
-            descEl.textContent = "点击任意一份试卷立即开始刷题，选项顺序每次自动随机打乱。";
+            tagEl.textContent = "第一大区 · 历年单卷";
+            titleEl.textContent = "选择真题试卷（共 14 份）";
+            descEl.textContent = "点击任意一份试卷即可开始作答，选项顺序每次自动随机排列。";
 
             gridEl.innerHTML = PAPERS_CONFIG.map(p => {
                 const count = window.GESP_QUESTIONS.filter(q => q.paperId === p.paperId).length;
@@ -170,15 +189,15 @@ class GESPSystem {
                             <h3>${p.title}</h3>
                             <p>${p.sub}</p>
                         </div>
-                        <div class="subzone-start-bar">✏ 点击立即开刷 ➔</div>
+                        <div class="subzone-start-bar">开始作答 ➔</div>
                     </div>
                 `;
             }).join("");
 
         } else if (zoneKey === "zone2") {
             tagEl.textContent = "第二大区 · 年度合集";
-            titleEl.textContent = "选择要刷的年份合集（按年份打包）";
-            descEl.textContent = "既可以一次刷完一整年的全部真题，也可以从该年份随机抽1套标准卷。";
+            titleEl.textContent = "选择年份合集";
+            descEl.textContent = "支持练习指定年份的全部真题，或从该年份随机抽取一套标准试卷。";
 
             gridEl.innerHTML = YEARS_CONFIG.map(y => {
                 return `
@@ -188,15 +207,15 @@ class GESPSystem {
                             <h3>${y.title}</h3>
                             <p>${y.desc}</p>
                         </div>
-                        <div class="subzone-start-bar">🚀 点击立即开刷 ➔</div>
+                        <div class="subzone-start-bar">开始作答 ➔</div>
                     </div>
                 `;
             }).join("");
 
         } else if (zoneKey === "zone3") {
             tagEl.textContent = "第三大区 · 全库综合";
-            titleEl.textContent = "14套真题全库混抽（共 350 题）";
-            descEl.textContent = "把所有14份旧卷混在一起，点击下方任意模式立即开始挑战。";
+            titleEl.textContent = "14套真题全库综合（共 350 题）";
+            descEl.textContent = "将所有 14 份试卷合并抽取，点击下方任意模式即可开始练习。";
 
             gridEl.innerHTML = COMP_CONFIG.map(c => {
                 return `
@@ -206,7 +225,7 @@ class GESPSystem {
                             <h3>${c.title}</h3>
                             <p>${c.desc}</p>
                         </div>
-                        <div class="subzone-start-bar">🔥 点击立即开刷 ➔</div>
+                        <div class="subzone-start-bar">开始作答 ➔</div>
                     </div>
                 `;
             }).join("");
@@ -215,9 +234,8 @@ class GESPSystem {
         this.switchView("subZoneView");
     }
 
-    // ==================== 启动刷题与选项随机打乱 ====================
+    // ==================== 启动练习与选项随机打乱 ====================
 
-    // 为每一道题随机打乱选项顺序（单选题4个选项全随机，判断题固定[正确, 错误]）
     buildShuffledQuestions(rawList) {
         return rawList.map(q => {
             let shuffledOptions = [];
@@ -236,7 +254,6 @@ class GESPSystem {
         });
     }
 
-    // 第一大区：启动单卷
     startPaperQuiz(paperId, title) {
         const list = window.GESP_QUESTIONS
             .filter(q => q.paperId === paperId)
@@ -252,7 +269,6 @@ class GESPSystem {
         this.beginRound(title, list, 1);
     }
 
-    // 第二大区：启动年度卷
     startYearQuiz(year, mode, title) {
         const yearPool = window.GESP_QUESTIONS.filter(q => q.year === year);
         if (yearPool.length === 0) {
@@ -269,7 +285,6 @@ class GESPSystem {
         }
     }
 
-    // 第三大区：启动综合卷
     startCompQuiz(mode, title) {
         const allPool = window.GESP_QUESTIONS;
         if (allPool.length === 0) {
@@ -290,7 +305,6 @@ class GESPSystem {
         }
     }
 
-    // 开启第 N 轮作答（第1轮为初始题目，第2+轮为本轮错题死磕，选项每次重新随机）
     beginRound(title, rawQuestionList, roundNumber) {
         this.quizTitle = title;
         this.round = roundNumber;
@@ -300,10 +314,10 @@ class GESPSystem {
 
         const roundBadge = document.getElementById("roundBadge");
         if (roundNumber === 1) {
-            roundBadge.textContent = "第 1 轮：正式刷题";
+            roundBadge.textContent = "第 1 轮：正式作答";
             roundBadge.className = "round-pill";
         } else {
-            roundBadge.textContent = `第 ${roundNumber} 轮：当次错题重做（剩余 ${this.activeQuestions.length} 题 · 选项已重新随机）`;
+            roundBadge.textContent = `第 ${roundNumber} 轮：当次错题重练（剩余 ${this.activeQuestions.length} 题 · 选项已重新随机）`;
             roundBadge.className = "round-pill retry";
         }
 
@@ -313,7 +327,6 @@ class GESPSystem {
         this.renderSheet();
     }
 
-    // 清空当次刷题数据与错题队列
     clearSessionData() {
         this.activeQuestions = [];
         this.userAnswers = {};
@@ -322,9 +335,8 @@ class GESPSystem {
         this.round = 1;
     }
 
-    // 随时退出回小区列表
     exitQuizSession() {
-        if (confirm("确定要退出当前刷题吗？（退出后当次刷题进度与错题将不保存）")) {
+        if (confirm("确定要退出当前练习吗？（退出后当次练习进度与错题记录将不保存）")) {
             this.clearSessionData();
             if (this.currentMajorZone) {
                 this.openMajorZone(this.currentMajorZone);
@@ -373,8 +385,8 @@ class GESPSystem {
 
         const expHtml = instantExp ? `
             <div class="exp-box">
-                <div class="exp-title">💡 零基础保姆级解析</div>
-                <div class="exp-body">${this.escapeHtml(q.explanation)}</div>
+                <div class="exp-title">💡 题目详解</div>
+                <div class="exp-body">${this.escapeHtml(this.cleanExplanation(q.explanation))}</div>
             </div>
         ` : "";
 
@@ -440,19 +452,19 @@ class GESPSystem {
     submitEarly() {
         const done = Object.keys(this.userAnswers).length;
         const total = this.activeQuestions.length;
-        if (confirm(`当前已答 ${done} / ${total} 题。确定现在提前交卷结算吗？（未作答的题也会归入本轮错题供你重做）`)) {
+        if (confirm(`当前已答 ${done} / ${total} 题。确定现在提前交卷结算吗？（未作答的题目将归入本轮错题以便继续重练）`)) {
             this.submitQuiz(true);
         }
     }
 
-    // ==================== 本轮交卷结算与当次错题死磕循环 ====================
+    // ==================== 本轮交卷结算与当次错题重练循环 ====================
 
     submitQuiz(force = false) {
         const total = this.activeQuestions.length;
         const done = Object.keys(this.userAnswers).length;
 
         if (!force && done < total) {
-            if (!confirm(`还有 ${total - done} 道题未作答，未答题目将算作错题进入下一轮重做。确定现在交卷吗？`)) {
+            if (!confirm(`还有 ${total - done} 道题未作答，未答题目将归入错题进入下一轮练习。确定现在交卷吗？`)) {
                 return;
             }
         }
@@ -491,15 +503,15 @@ class GESPSystem {
             banner.innerHTML = `
                 <div class="result-score-ring all-pass">
                     <span class="score-val">100%</span>
-                    <span class="score-sub">全对通关</span>
+                    <span class="score-sub">全部答对</span>
                 </div>
-                <h2>🎉 恭喜！本轮 ${total} 道题已全部答对通关！</h2>
+                <h2>🎉 本轮 ${total} 道题已全部答对！</h2>
                 <p style="color: var(--text-secondary); margin-top: 8px;">
-                    你在第 ${this.round} 轮成功把所有题目全部做对，没有留下任何一道错题！
+                    你在第 ${this.round} 轮完成了所有题目，全部回答正确。
                 </p>
                 <div class="result-btn-row">
                     <button class="btn btn-primary btn-lg" onclick="app.clearSessionData(); app.openMajorZone(app.currentMajorZone || 'zone1');">
-                        🔙 返回小区列表选下一份卷
+                        🔙 返回列表选择其他试卷
                     </button>
                     <button class="btn btn-outline btn-lg" onclick="app.clearSessionData(); app.backToHome();">
                         🏠 返回三大区首页
@@ -512,16 +524,16 @@ class GESPSystem {
                     <span class="score-val">${pct}%</span>
                     <span class="score-sub">正确率</span>
                 </div>
-                <h2>第 ${this.round} 轮完成：答对 ${correctCount} 题，本轮有 ${wrongCount} 道错题</h2>
+                <h2>第 ${this.round} 轮完成：答对 ${correctCount} 题，待巩固错题 ${wrongCount} 题</h2>
                 <p style="color: var(--text-secondary); margin-top: 8px;">
-                    请先看下方每道错题的<strong>零基础保姆级解析</strong>。只要不退出，点击下方红色按钮即可<strong>只重做这 ${wrongCount} 道错题（选项顺序会再次随机打乱）</strong>，一直做到全对为止！
+                    可先在下方查看每道题的<strong>题目详解</strong>，然后点击下方红色按钮<strong>重练本轮 ${wrongCount} 道错题（选项顺序将重新随机排列）</strong>，直至全部答对。
                 </p>
                 <div class="result-btn-row">
                     <button class="btn btn-danger btn-lg pulse-retry" onclick="app.retryCurrentWrong()">
-                        🔄 继续重做本轮 ${wrongCount} 道错题（直到全对！）
+                        🔄 重练本轮 ${wrongCount} 道错题（直至全对）
                     </button>
                     <button class="btn btn-outline btn-lg" onclick="app.exitQuizSession()">
-                        🚪 退出本次刷题（不保存错题）
+                        🚪 退出本次练习（不保存错题）
                     </button>
                 </div>
             `;
@@ -534,7 +546,6 @@ class GESPSystem {
         this.renderReviewList(wrongCount > 0 ? "wrong" : "all");
     }
 
-    // 点击“继续重做本轮错题”：将错题传入下一轮，且选项顺序再次随机打乱
     retryCurrentWrong() {
         if (this.wrongQueue.length === 0) return;
         const nextRoundQuestions = [...this.wrongQueue];
@@ -597,8 +608,8 @@ class GESPSystem {
                     ${q.svgDiagram ? `<div class="flowchart-box">${q.svgDiagram}</div>` : ""}
                     <div class="options-wrap">${optsHtml}</div>
                     <div class="exp-box">
-                        <div class="exp-title">🎓 零基础保姆级详解</div>
-                        <div class="exp-body">${this.escapeHtml(q.explanation)}</div>
+                        <div class="exp-title">💡 题目详解</div>
+                        <div class="exp-body">${this.escapeHtml(this.cleanExplanation(q.explanation))}</div>
                     </div>
                 </div>
             `;
