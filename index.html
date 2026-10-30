@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CCF GESP C++ 三级真题刷题系统</title>
+    <title>CCF GESP C++ 三级真题练习系统</title>
     <link rel="stylesheet" href="style.css">
-    <!-- 内置基础视图隐藏保护：万一 style.css 文件名写错也能防止页面全部堆叠在一起 -->
     <style>
         .view-page { display: none; }
         .view-page.active { display: block; }
@@ -17,7 +16,7 @@
         <div class="navbar-inner">
             <div class="brand-logo" onclick="app.handleNavHome()">
                 <span class="logo-tag">CCF GESP</span>
-                <span class="logo-title">C++ 三级真题特训系统</span>
+                <span class="logo-title">C++ 三级真题练习系统</span>
             </div>
             <div class="navbar-right">
                 <span id="questionCountStatus" class="status-badge">题库检测中...</span>
@@ -31,8 +30,8 @@
         <!-- ==================== 页面 1：首页（三大区入口按钮） ==================== -->
         <section id="homeView" class="view-page active">
             <div class="hero-header">
-                <h1>请选择你要进入的刷题大区</h1>
-                <p>收录 2023—2026 共 14 套 GESP C++ 三级真题（350 道客观题）· 选项随机打乱 · 当次错题死磕到底</p>
+                <h1>请选择练习专区</h1>
+                <p>收录 2023—2026 共 14 套 GESP C++ 三级真题（350 道客观题）· 选项随机排列 · 当次错题专项巩固</p>
             </div>
 
             <div class="big-zones-grid">
@@ -40,9 +39,9 @@
                 <div class="big-zone-btn zone-theme-blue" onclick="app.openMajorZone('zone1')">
                     <div class="zone-icon-wrap">📄</div>
                     <div class="zone-badge">第一大区</div>
-                    <h2>单卷真题区</h2>
-                    <p>每一份旧卷独立一个小区（如 2025年3月、2026年6月等），共 14 份原卷，还原考场体验。</p>
-                    <div class="zone-enter-text">点击进入选择试卷 ➔</div>
+                    <h2>历年单卷区</h2>
+                    <p>按单份试卷独立划分（如 2025年3月、2026年6月等），共 14 份原卷，还原真实考试结构。</p>
+                    <div class="zone-enter-text">进入选择试卷 ➔</div>
                 </div>
 
                 <!-- 第二大区按钮 -->
@@ -50,17 +49,17 @@
                     <div class="zone-icon-wrap">📅</div>
                     <div class="zone-badge">第二大区</div>
                     <h2>年度合集区</h2>
-                    <p>每一年合并为一个大卷（2023年、2024年、2025年、2026年），按年份集中火力刷透。</p>
-                    <div class="zone-enter-text">点击进入选择年份 ➔</div>
+                    <p>按年份汇总全年真题（2023年、2024年、2025年、2026年），支持全年题库练习或按年随机抽卷。</p>
+                    <div class="zone-enter-text">进入选择年份 ➔</div>
                 </div>
 
                 <!-- 第三大区按钮 -->
                 <div class="big-zone-btn zone-theme-purple" onclick="app.openMajorZone('zone3')">
-                    <div class="zone-icon-wrap">🔥</div>
+                    <div class="zone-icon-wrap">📚</div>
                     <div class="zone-badge">第三大区</div>
-                    <h2>全库大综合</h2>
-                    <p>把全部 14 份真题（350 题）混在一起！支持 350 题全量大通关或随机抽取标准模拟卷。</p>
-                    <div class="zone-enter-text">点击进入综合挑战 ➔</div>
+                    <h2>全库综合区</h2>
+                    <p>汇集全部 14 份真题（350 题）混合抽取，支持全量练习或随机抽取标准模拟卷。</p>
+                    <div class="zone-enter-text">进入综合练习 ➔</div>
                 </div>
             </div>
         </section>
@@ -73,8 +72,8 @@
                 </button>
                 <div class="subzone-title-wrap">
                     <span id="subZoneTag" class="subzone-tag">第一大区</span>
-                    <h2 id="subZoneTitle">单卷真题区</h2>
-                    <p id="subZoneDesc">点击下方任意一个小区即可立即开始刷题</p>
+                    <h2 id="subZoneTitle">历年单卷区</h2>
+                    <p id="subZoneDesc">点击下方任意一个模块即可开始答题</p>
                 </div>
             </div>
 
@@ -87,16 +86,16 @@
             <!-- 刷题顶部控制栏 -->
             <div class="quiz-header-card">
                 <div class="quiz-title-group">
-                    <span id="roundBadge" class="round-pill">第 1 轮：正式刷题</span>
+                    <span id="roundBadge" class="round-pill">第 1 轮：正式作答</span>
                     <h2 id="activeQuizTitle">2025年03月 C++三级真题</h2>
                 </div>
                 <div class="quiz-action-group">
-                    <label class="toggle-label" title="开启后选中选项即可立刻查看解析">
+                    <label class="toggle-label" title="开启后选中选项即可立刻查看题目详解">
                         <input type="checkbox" id="instantShowExp">
-                        <span>边做边看解析</span>
+                        <span>即时查看解析</span>
                     </label>
-                    <button class="btn btn-warning btn-sm" onclick="app.submitEarly()">提前交卷结算</button>
-                    <button class="btn btn-danger btn-sm" onclick="app.exitQuizSession()">🚪 随时退出</button>
+                    <button class="btn btn-warning btn-sm" onclick="app.submitEarly()">提前交卷</button>
+                    <button class="btn btn-danger btn-sm" onclick="app.exitQuizSession()">🚪 退出练习</button>
                 </div>
             </div>
 
@@ -119,7 +118,7 @@
 
                     <div class="question-footer-nav">
                         <button id="prevBtn" class="btn btn-outline" onclick="app.prevQuestion()">⬅ 上一题</button>
-                        <span class="shortcut-tip">提示：键盘 1~4 可快速选答案，左右方向键切题</span>
+                        <span class="shortcut-tip">快捷键：数字键 1~4 选择选项，左右方向键切换题目</span>
                         <button id="nextBtn" class="btn btn-primary" onclick="app.nextQuestion()">下一题 ➡</button>
                         <button id="finishBtn" class="btn btn-success" onclick="app.submitQuiz(false)">✅ 完成交卷</button>
                     </div>
@@ -141,23 +140,23 @@
             </div>
         </section>
 
-        <!-- ==================== 页面 4：本轮结算与错题死磕页 ==================== -->
+        <!-- ==================== 页面 4：本轮结算与错题重练页 ==================== -->
         <section id="resultView" class="view-page">
             <!-- 结算大卡片 -->
             <div id="resultBannerCard" class="result-banner-card"></div>
 
             <!-- 题目解析筛选栏 -->
             <div class="review-toolbar">
-                <h3>📖 本轮作答详情与零基础保姆级解析</h3>
+                <h3>📖 作答详情与题目详解</h3>
                 <div class="filter-group">
                     <button class="filter-pill active" data-filter="all" onclick="app.renderReviewList('all')">
                         全部 (<span id="numAll">0</span>)
                     </button>
                     <button class="filter-pill" data-filter="wrong" onclick="app.renderReviewList('wrong')">
-                        只看本轮错题/未答 (<span id="numWrong">0</span>)
+                        本轮错题/未答 (<span id="numWrong">0</span>)
                     </button>
                     <button class="filter-pill" data-filter="correct" onclick="app.renderReviewList('correct')">
-                        只看已答对 (<span id="numCorrect">0</span>)
+                        已答对 (<span id="numCorrect">0</span>)
                     </button>
                 </div>
             </div>
