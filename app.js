@@ -1,6 +1,6 @@
 /**
  * CCF GESP C++ 三级真题练习系统核心逻辑
- * 结构：首页（3个大区按钮） -> 小区列表（点击开始答题） -> 答题页（随时退出 / 当次错题重练直到全对）
+ * 已内置：选项随机打乱后，自动同步更新解析中的 A/B/C/D 选项代号
  */
 
 window.GESP_QUESTIONS = window.GESP_QUESTIONS || [];
@@ -115,10 +115,11 @@ class GESPSystem {
             .replace(/'/g, "&#039;");
     }
 
-    // 自动净化解析文字，移除不恰当的标签与口语化表达
-    cleanExplanation(rawText) {
-        if (!rawText) return "";
-        return String(rawText)
+    // 清理不恰当词汇，并将解析中的原卷选项字母（A/B/C/D）动态映射为当前随机后的选项字母
+    formatExplanation(q) {
+        if (!q || !q.explanation) return "";
+
+        let text = String(q.explanation)
             .replace(/【零基础保姆级解析】\s*/g, "")
             .replace(/零基础保姆级/g, "")
             .replace(/保姆级/g, "")
@@ -139,6 +140,68 @@ class GESPSystem {
             .replace(/立刻秒答：/g, "可直接得出：")
             .replace(/秒杀|秒选/g, "快速得出")
             .trim();
+
+        // 判断题无需映射 A/B/C/D
+        if (q.type !== "single" || !q.letterMap) {
+            return text;
+        }
+
+        const map = q.letterMap;
+        const toToken = (letter) => `\u0000OPT_${letter}\u0000`;
+        const replaceMultiLetters = (s) => s.replace(/[A-D]/g, (L) => toToken(L));
+
+        // 第一步：将所有指代选项的 A/B/C/D 替换为唯一占位符（防止 A->C 与 C->A 互相覆盖）
+        // 1. "选项 A" / "选项A"
+        text = text.replace(/选项\s*([A-D])/g, (_, L) => `选项 ${toToken(L)}`);
+        // 2. "A 选项" / "A选项"
+        text = text.replace(/([A-D])\s*选项/g, (_, L) => `${toToken(L)} 选项`);
+        // 3. "选 A" / "锁定 A" / "答案为 A" / "答案是 A"
+        text = text.replace(/(选|锁定|答案为|答案是)\s*(\*\*)?([A-D])(?![a-zA-Z0-9])/g, (_, p1, p2, L) => `${p1}${p2 || ""}${toToken(L)}`);
+        // 4. "排除 A、B" / "排除 C 和 D" / "对比 C 和 D"
+        text = text.replace(/(排除|对比)\s*([A-D](?:\s*[、和与,，]\s*[A-D])*)/g, (_, verb, listStr) => `${verb} ${replaceMultiLetters(listStr)}`);
+        // 5. "A、B、C 全都" / "A、B、D 三个选项" / "B 和 C 都是" / "B、D 错"
+        text = text.replace(/([A-D](?:\s*[、和与,，]\s*[A-D])+)\s*(全都|都是|三个选项|均|都|错|对|的循环)/g, (_, listStr, suffix) => `${replaceMultiLetters(listStr)} ${suffix}`);
+        // 6. 行首列表项 "- A：" / "1. A：" / "- A. " / "- A 错" / "- B 对"
+        text = text.replace(/(^|\n)(\s*(?:[-•]|\d+\.)\s*)([A-D])(\s*(?:[：:\.]|\s*(?:错|对)))/g, (_, nl, prefix, L, suffix) => `${nl}${prefix}${toToken(L)}${suffix}`);
+        // 7. "所以 D 是错误的" / "因此 C 错误" / "只有 A 正确"
+        text = text.replace(/(所以|因此|可见|故|而|只有|那么)\s*([A-D])\s*(是错误的|是正确的|错误|正确|说法错误|说法正确|不对)/g, (_, p1, L, p2) => `${p1} ${toToken(L)} ${p2}`);
+        // 8. "（A 中" / "；C 中" / "；D 中"
+        text = text.replace(/([（(；;]\s*)([A-D])(\s*中)/g, (_, p1, L, p2) => `${p1}${toToken(L)}${p2}`);
+
+        // 第二步：将占位符一次性替换为当前随机后的新选项字母
+        text = text.replace(/\u0000OPT_([A-D])\u0000/g, (_, origL) => map[origL] || origL);
+
+        // 第三步：将连续的单行选项分析（如 - A ... \n - B ...）按新的 A、B、C、D 顺序自动排好序
+        const lines = text.split("\n");
+        const bulletRegex = /^\s*-\s*(?:只有)?(?:选项\s*)?([A-D])(?![a-zA-Z0-9])/;
+        const resultLines = [];
+        let i = 0;
+        while (i < lines.length) {
+            if (bulletRegex.test(lines[i])) {
+                const group = [];
+                while (i < lines.length && bulletRegex.test(lines[i])) {
+                    const match = lines[i].match(bulletRegex);
+                    group.push({ letter: match[1], line: lines[i] });
+                    i++;
+                }
+                group.sort((a, b) => a.letter.localeCompare(b.letter));
+                group.forEach(item => resultLines.push(item.line));
+            } else {
+                resultLines.push(lines[i]);
+                i++;
+            }
+        }
+        text = resultLines.join("\n");
+
+        // 第四步：在详解顶部附上当前随机顺序下的正确选项提示
+        const letters = ["A", "B", "C", "D"];
+        const correctIdx = q.shuffledOptions.findIndex(o => o.isCorrect);
+        if (correctIdx !== -1) {
+            const currentCorrectLetter = letters[correctIdx];
+            text = `【本轮正确答案：选项 ${currentCorrectLetter}】\n` + text;
+        }
+
+        return text;
     }
 
     renderCode(codeStr) {
@@ -237,19 +300,42 @@ class GESPSystem {
     // ==================== 启动练习与选项随机打乱 ====================
 
     buildShuffledQuestions(rawList) {
+        const origLetters = ["A", "B", "C", "D"];
+
         return rawList.map(q => {
             let shuffledOptions = [];
+            let letterMap = null;
+
             if (q.type === "single") {
-                shuffledOptions = this.shuffle(q.options.map(o => ({ ...o })));
+                // 先为每个原始选项标记其原卷字母 A/B/C/D
+                const tagged = q.options.map((o, idx) => ({
+                    ...o,
+                    origLetter: origLetters[idx]
+                }));
+
+                shuffledOptions = this.shuffle(tagged);
+                letterMap = {};
+
+                shuffledOptions.forEach((opt, newIdx) => {
+                    const newLetter = origLetters[newIdx];
+                    letterMap[opt.origLetter] = newLetter;
+
+                    // 如果原选项文字是“选项A/选项B/选项C/选项D”，同步更新为当前随机后的字母
+                    if (/^选项\s*[A-D]$/.test(String(opt.text || "").trim())) {
+                        opt.text = `选项 ${newLetter}`;
+                    }
+                });
             } else {
                 shuffledOptions = [
                     { text: "正确 (√)", isCorrect: q.answer === true },
                     { text: "错误 (×)", isCorrect: q.answer === false }
                 ];
             }
+
             return {
                 ...q,
-                shuffledOptions
+                shuffledOptions,
+                letterMap
             };
         });
     }
@@ -386,7 +472,7 @@ class GESPSystem {
         const expHtml = instantExp ? `
             <div class="exp-box">
                 <div class="exp-title">💡 题目详解</div>
-                <div class="exp-body">${this.escapeHtml(this.cleanExplanation(q.explanation))}</div>
+                <div class="exp-body">${this.escapeHtml(this.formatExplanation(q))}</div>
             </div>
         ` : "";
 
@@ -609,7 +695,7 @@ class GESPSystem {
                     <div class="options-wrap">${optsHtml}</div>
                     <div class="exp-box">
                         <div class="exp-title">💡 题目详解</div>
-                        <div class="exp-body">${this.escapeHtml(this.cleanExplanation(q.explanation))}</div>
+                        <div class="exp-body">${this.escapeHtml(this.formatExplanation(q))}</div>
                     </div>
                 </div>
             `;
