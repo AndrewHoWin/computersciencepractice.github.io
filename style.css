@@ -872,3 +872,461 @@ body {
 
 .ans-tag.ok { background: var(--success-light); color: var(--success); }
 .ans-tag.err { background: var(--danger-light); color: var(--danger); }
+
+
+
+/* ==================== 顶部全站飘屏广播 (弹幕与置顶跑马灯) ==================== */
+.pinned-broadcast-bar {
+    background: linear-gradient(90deg, #1e3a8a, #2563eb, #4f46e5);
+    color: #ffffff;
+    padding: 8px 16px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    position: sticky;
+    top: 0;
+    z-index: 9998;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.pinned-broadcast-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pinned-tag {
+    background: #f59e0b;
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 99px;
+    font-size: 0.8rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.pinned-marquee-wrap {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+}
+
+.pinned-marquee-text {
+    display: inline-block;
+    padding-left: 100%;
+    animation: marqueeScroll 18s linear infinite;
+}
+
+@keyframes marqueeScroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-100%); }
+}
+
+.danmaku-container {
+    position: fixed;
+    top: 14px;
+    left: 0;
+    width: 100vw;
+    height: 160px;
+    pointer-events: none;
+    z-index: 10050;
+    overflow: hidden;
+}
+
+.danmaku-item {
+    position: absolute;
+    left: 100vw;
+    white-space: nowrap;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(37, 99, 235, 0.94));
+    color: #ffffff;
+    padding: 10px 24px;
+    border-radius: 999px;
+    font-size: 1.08rem;
+    font-weight: 800;
+    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.35);
+    border: 2px solid #60a5fa;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    animation: danmakuFly 13s linear forwards;
+}
+
+.danmaku-item .bc-badge {
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.78rem;
+    padding: 2px 8px;
+    border-radius: 99px;
+}
+
+@keyframes danmakuFly {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(calc(-100vw - 120%)); }
+}
+
+/* ==================== 管理员隐藏后台与弹窗样式 ==================== */
+.admin-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.admin-login-box {
+    background: #ffffff;
+    width: 100%;
+    max-width: 420px;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+}
+
+.admin-login-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.admin-close-x {
+    background: #f1f5f9;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-weight: 800;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.admin-close-x:hover {
+    background: #e2e8f0;
+    color: var(--danger);
+}
+
+.admin-login-desc {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.admin-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.admin-input:focus {
+    border-color: var(--primary);
+}
+
+.admin-login-err {
+    color: var(--danger);
+    font-size: 0.85rem;
+    font-weight: 700;
+    min-height: 22px;
+    margin-top: 6px;
+}
+
+.admin-login-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+/* 监控主面板 */
+.admin-dashboard-card {
+    background: #f8fafc;
+    width: 100%;
+    max-width: 1260px;
+    height: 90vh;
+    border-radius: 18px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+    border: 1px solid #cbd5e1;
+}
+
+.admin-dash-topbar {
+    background: #0f172a;
+    color: #ffffff;
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.admin-dash-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.admin-dash-title-wrap h2 {
+    font-size: 1.2rem;
+    font-weight: 800;
+}
+
+.admin-badge-live {
+    background: rgba(22, 163, 74, 0.25);
+    color: #4ade80;
+    border: 1px solid #22c55e;
+    font-size: 0.78rem;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: 99px;
+}
+
+.admin-channel-tag {
+    background: rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
+    font-size: 0.78rem;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-family: monospace;
+}
+
+.admin-dash-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.admin-broadcast-panel {
+    background: #ffffff;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+}
+
+.admin-bc-title {
+    font-size: 0.92rem;
+    margin-bottom: 10px;
+    color: var(--text-primary);
+}
+
+.admin-bc-title span {
+    color: var(--text-muted);
+    font-size: 0.84rem;
+}
+
+.admin-bc-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.admin-select {
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1.5px solid #cbd5e1;
+    font-weight: 700;
+    font-size: 0.88rem;
+    background: #f8fafc;
+}
+
+.bc-input {
+    flex: 1;
+    min-width: 240px;
+}
+
+.admin-bc-presets {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.preset-chip {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 99px;
+    padding: 3px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.preset-chip:hover {
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: #93c5fd;
+}
+
+.admin-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    padding: 14px 24px;
+    background: #f1f5f9;
+    border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 860px) {
+    .admin-kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.admin-kpi-card {
+    background: #ffffff;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+
+.kpi-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 700;
+}
+
+.kpi-val {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin-top: 2px;
+}
+
+.text-success { color: var(--success); }
+.text-primary { color: var(--primary); }
+.text-danger { color: var(--danger); }
+
+.admin-tabs-bar {
+    padding: 12px 24px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.admin-tabs-left {
+    display: flex;
+    gap: 10px;
+}
+
+.admin-tab-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #f8fafc;
+    font-weight: 800;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.admin-tab-btn.active {
+    background: var(--primary);
+    color: #ffffff;
+    border-color: var(--primary);
+}
+
+.admin-search {
+    width: 280px;
+    padding: 7px 12px;
+    font-size: 0.86rem;
+}
+
+.admin-table-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 24px;
+}
+
+.monitor-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    font-size: 0.88rem;
+}
+
+.monitor-table th {
+    background: #f1f5f9;
+    color: var(--text-secondary);
+    font-weight: 800;
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.monitor-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+}
+
+.monitor-table tr:hover td {
+    background: #f8fafc;
+}
+
+.tag-pill {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 99px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.tag-online { background: #dcfce7; color: #15803d; }
+.tag-offline { background: #f1f5f9; color: #64748b; }
+.tag-good { background: #dcfce7; color: #15803d; }
+.tag-warn { background: #fef3c7; color: #b45309; }
+.tag-bad { background: #fee2e2; color: #dc2626; }
+
+.admin-detail-card {
+    background: #ffffff;
+    width: 100%;
+    max-width: 960px;
+    max-height: 86vh;
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+}
+
+.admin-detail-meta {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    font-size: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.admin-detail-body {
+    flex: 1;
+    overflow-y: auto;
+}
