@@ -1340,6 +1340,16 @@ const OPT_NOTES = {
     ]
 };
 
+// ==================== 跨国云端实时监控与广播配置 ====================
+// 默认管理员密码（可在下方修改）
+const ADMIN_DEFAULT_PWD = "888888";
+// 全球跨国云端同步频道 ID（所有上传到 GitHub Pages 的客户端自动共用此加密频道）
+const GLOBAL_SYNC_CHANNEL = "gesp3_cpp_monitor_2026_ channel_v2".replace(/\s+/g, "");
+const LOCAL_ADMIN_DB_KEY = "GESP_ADMIN_PERMANENT_DB_V2";
+const LOCAL_CLIENT_ID_KEY = "GESP_CLIENT_DEVICE_ID_V2";
+const LOCAL_CLIENT_NOTE_KEY = "GESP_CLIENT_NICKNAME_V2";
+const LOCAL_SEEN_BC_KEY = "GESP_SEEN_BROADCAST_IDS_V2";
+
 class GESPSystem {
     constructor() {
         this.currentMajorZone = null;
@@ -1351,7 +1361,90 @@ class GESPSystem {
         this.roundResults = [];
         this.wrongQueue = [];
 
+        // 监控与统计状态
+        this.clientId = this.getOrCreateClientId();
+        this.clientIp = "检测中...";
+        this.clientLocation = "";
+        this.nickname = localStorage.getItem(LOCAL_CLIENT_NOTE_KEY) || "";
+        this.currentViewId = "homeView";
+
+        // 单轮做题认真度追踪指标
+        this.quizStartTime = 0;
+        this.questionEnterTime = 0;
+        this.questionTimeSpent = {};     // { qId: 累计停留秒数 }
+        this.questionExpViewed = {};     // { qId: 是否在作答该题时开启了即时解析 }
+        this.sessionTabSwitches = 0;     // 本轮切屏/失焦次数
+        this.instantExpUsedCount = 0;    // 本轮查看即时解析的题目数
+
+        // 管理员后台状态与永久数据库
+        this.secretClickCount = 0;
+        this.secretClickTimer = null;
+        this.isAdminAuthenticated = sessionStorage.getItem("GESP_ADMIN_AUTH") === "1";
+        this.adminTab = "clients";
+        this.adminDb = this.loadPermanentAdminDb();
+        this.seenBroadcastIds = this.loadSeenBroadcastIds();
+        this.hasLocalPythonBackend = false;
+        this.sseSource = null;
+        this.lastReportTime = 0;
+
         this.init();
+    }
+
+    getOrCreateClientId() {
+        let cid = localStorage.getItem(LOCAL_CLIENT_ID_KEY);
+        if (!cid) {
+            cid = "dev_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now().toString(36).slice(-4);
+            localStorage.setItem(LOCAL_CLIENT_ID_KEY, cid);
+        }
+        return cid;
+    }
+
+    loadPermanentAdminDb() {
+        try {
+            const raw = localStorage.getItem(LOCAL_ADMIN_DB_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                return {
+                    clients: parsed.clients || {},
+                    submissions: parsed.submissions || [],
+                    broadcasts: parsed.broadcasts || [],
+                    activePinned: parsed.activePinned || null,
+                    clientNotes: parsed.clientNotes || {}
+                };
+            }
+        } catch (e) {
+            console.warn("读取本地管理员归档失败:", e);
+        }
+        return {
+            clients: {},
+            submissions: [],
+            broadcasts: [],
+            activePinned: null,
+            clientNotes: {}
+        };
+    }
+
+    savePermanentAdminDb() {
+        try {
+            localStorage.setItem(LOCAL_ADMIN_DB_KEY, JSON.stringify(this.adminDb));
+        } catch (e) {
+            console.warn("保存本地管理员归档失败:", e);
+        }
+    }
+
+    loadSeenBroadcastIds() {
+        try {
+            const raw = sessionStorage.getItem(LOCAL_SEEN_BC_KEY);
+            if (raw) return new Set(JSON.parse(raw));
+        } catch (e) {}
+        return new Set();
+    }
+
+    saveSeenBroadcastIds() {
+        try {
+            const arr = Array.from(this.seenBroadcastIds).slice(-100);
+            sessionStorage.setItem(LOCAL_SEEN_BC_KEY, JSON.stringify(arr));
+        } catch (e) {}
     }
 
     init() {
@@ -1367,12 +1460,28 @@ class GESPSystem {
 
         document.getElementById("instantShowExp").addEventListener("change", () => {
             if (document.getElementById("quizView").classList.contains("active")) {
+                const q = this.activeQuestions[this.currentIndex];
+                if (q && document.getElementById("instantShowExp").checked) {
+                    this.markExpViewed(q.id);
+                }
                 this.renderQuestion();
+                this.reportTelemetry("toggle_exp");
             }
         });
 
+        // 快捷键监听：做题快捷键 + 管理员隐藏唤醒快捷键 (Ctrl+Shift+M 或 Alt+M)
         window.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey && e.shiftKey && (e.key === "M" || e.key === "m")) ||
+                (e.altKey && (e.key === "M" || e.key === "m"))) {
+                e.preventDefault();
+                this.openAdminTrigger();
+                return;
+            }
+
             if (!document.getElementById("quizView").classList.contains("active")) return;
+            // 若在输入框中则不触发题目快捷键
+            if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+
             if (e.key === "ArrowLeft") {
                 this.prevQuestion();
             } else if (e.key === "ArrowRight") {
@@ -1385,9 +1494,1091 @@ class GESPSystem {
                 }
             }
         });
+
+        // 切屏 / 窗口失焦监测（用于判断学生是否认真做题或切屏查资料）
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden && this.currentViewId === "quizView") {
+                this.sessionTabSwitches++;
+                this.recordCurrentQuestionTime();
+                this.reportTelemetry("tab_switch");
+            } else if (!document.hidden && this.currentViewId === "quizView") {
+                this.questionEnterTime = Date.now();
+            }
+        });
+
+        // 离开或刷新页面前上报最新进度
+        window.addEventListener("beforeunload", () => {
+            this.recordCurrentQuestionTime();
+            this.reportTelemetry("page_unload", null, true);
+        });
+
+        // 启动跨国公网 IP 检测与云端实时广播/监控通道
+        this.initNetworkAndSync();
     }
 
+    // ==================== 公网 IP 检测与跨国云端实时通信 ====================
+
+    async initNetworkAndSync() {
+        await this.detectPublicIP();
+        // 先恢复本地已保存的置顶公告
+        if (this.adminDb.activePinned) {
+            this.applyPinnedBroadcast(this.adminDb.activePinned);
+        }
+        // 拉取云端历史消息（确保刷新页面后所有 IP 记录、交卷记录、置顶广播完整恢复）
+        await this.pullCloudHistory();
+        // 建立实时 SSE 监听通道（秒级接收管理员顶部飘屏广播与学生做题数据）
+        this.connectRealtimeStream();
+        // 立即上报一次当前设备上线状态
+        this.reportTelemetry("client_online");
+
+        // 定时心跳上报（每 20 秒同步一次做题用时与在线状态）
+        setInterval(() => {
+            if (this.currentViewId === "quizView") {
+                this.recordCurrentQuestionTime();
+            }
+            this.reportTelemetry("heartbeat");
+        }, 20000);
+    }
+
+    async detectPublicIP() {
+        // 优先尝试探测是否有本地/同源 server.py 后端
+        try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 1500);
+            const res = await fetch("/api/sync", { signal: ctrl.signal });
+            clearTimeout(timer);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.ok && data.ip) {
+                    this.hasLocalPythonBackend = true;
+                    if (data.ip !== "127.0.0.1" && data.ip !== "::1") {
+                        this.clientIp = data.ip;
+                    }
+                }
+            }
+        } catch (e) {
+            this.hasLocalPythonBackend = false;
+        }
+
+        // 多节点跨国公网 IP 与地理位置检测（适配 GitHub Pages 全球访问）
+        const apis = [
+            {
+                url: "https://ipwho.is/",
+                parse: (d) => d && d.success && d.ip ? {
+                    ip: d.ip,
+                    loc: [d.country, d.region, d.city].filter(Boolean).join("·")
+                } : null
+            },
+            {
+                url: "https://ipapi.co/json/",
+                parse: (d) => d && d.ip ? {
+                    ip: d.ip,
+                    loc: [d.country_name, d.region, d.city].filter(Boolean).join("·")
+                } : null
+            },
+            {
+                url: "https://api.ipify.org?format=json",
+                parse: (d) => d && d.ip ? { ip: d.ip, loc: "" } : null
+            }
+        ];
+
+        for (const item of apis) {
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 3500);
+                const r = await fetch(item.url, { signal: ctrl.signal });
+                clearTimeout(t);
+                if (r.ok) {
+                    const json = await r.json();
+                    const info = item.parse(json);
+                    if (info && info.ip) {
+                        this.clientIp = info.ip;
+                        this.clientLocation = info.loc || "";
+                        return;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // 备用 Cloudflare Trace 接口
+        try {
+            const r = await fetch("https://www.cloudflare.com/cdn-cgi/trace");
+            if (r.ok) {
+                const text = await r.text();
+                const ipMatch = text.match(/ip=([^\n\r]+)/);
+                const locMatch = text.match(/loc=([^\n\r]+)/);
+                if (ipMatch) {
+                    this.clientIp = ipMatch[1].trim();
+                    this.clientLocation = locMatch ? locMatch[1].trim() : "";
+                    return;
+                }
+            }
+        } catch (e) {}
+
+        if (this.clientIp === "检测中...") {
+            this.clientIp = "未知公网IP";
+        }
+    }
+
+    getFullIpDisplay(ip, loc) {
+        if (!ip) return "未知IP";
+        return loc ? `${ip} (${loc})` : ip;
+    }
+
+    // 拉取云端频道的缓存历史（保证无论何时打开或刷新页面，所有历史数据完整无损）
+    async pullCloudHistory() {
+        // 1. 若有同源 server.py，同步拉取
+        if (this.hasLocalPythonBackend && this.isAdminAuthenticated) {
+            try {
+                const r = await fetch("/api/admin/data", {
+                    headers: { "X-Admin-Password": ADMIN_DEFAULT_PWD }
+                });
+                if (r.ok) {
+                    const d = await r.json();
+                    if (d && d.ok) {
+                        Object.assign(this.adminDb.clients, d.clients || {});
+                        this.mergeSubmissions(d.submissions || []);
+                        if (d.activePinned !== undefined) {
+                            this.adminDb.activePinned = d.activePinned;
+                            this.applyPinnedBroadcast(d.activePinned);
+                        }
+                        this.savePermanentAdminDb();
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // 2. 从跨国云端消息网关拉取全部历史包 (ntfy.sh JSON poll)
+        try {
+            const url = `https://ntfy.sh/${GLOBAL_SYNC_CHANNEL}/json?poll=1&since=all`;
+            const res = await fetch(url);
+            if (res.ok) {
+                const text = await res.text();
+                const lines = text.split("\n").filter(Boolean);
+                for (const line of lines) {
+                    try {
+                        const env = JSON.parse(line);
+                        if (env && env.event === "message" && env.message) {
+                            const payload = JSON.parse(env.message);
+                            this.processIncomingCloudPacket(payload, true);
+                        }
+                    } catch (err) {}
+                }
+                this.savePermanentAdminDb();
+                if (document.getElementById("adminDashboardModal")?.style.display !== "none") {
+                    this.renderAdminTables();
+                }
+            }
+        } catch (e) {
+            console.warn("拉取云端历史消息暂不可用:", e);
+        }
+    }
+
+    connectRealtimeStream() {
+        if (this.sseSource) {
+            try { this.sseSource.close(); } catch (e) {}
+        }
+        try {
+            const sseUrl = `https://ntfy.sh/${GLOBAL_SYNC_CHANNEL}/sse`;
+            this.sseSource = new EventSource(sseUrl);
+            this.sseSource.onmessage = (event) => {
+                try {
+                    const env = JSON.parse(event.data);
+                    if (env && env.event === "message" && env.message) {
+                        const payload = JSON.parse(env.message);
+                        this.processIncomingCloudPacket(payload, false);
+                    } else if (env && env.type) {
+                        this.processIncomingCloudPacket(env, false);
+                    }
+                } catch (e) {}
+            };
+        } catch (e) {
+            console.warn("建立实时流失败:", e);
+        }
+    }
+
+    processIncomingCloudPacket(packet, isHistoryPull = false) {
+        if (!packet || !packet.packetType) return;
+
+        // 1. 处理全站广播包
+        if (packet.packetType === "broadcast") {
+            const bc = packet.broadcast;
+            if (!bc || !bc.id) return;
+
+            if (bc.mode === "clear_pinned") {
+                this.adminDb.activePinned = null;
+                this.applyPinnedBroadcast(null);
+                this.savePermanentAdminDb();
+                return;
+            }
+
+            if (bc.mode === "pin") {
+                this.adminDb.activePinned = bc;
+                this.applyPinnedBroadcast(bc);
+            }
+
+            // 飘屏弹幕：如果是实时收到的，或者最近 25 秒内刚发出的广播且本机未播放过，立即在上方飘过！
+            const ageMs = Date.now() - (bc.createdAt || 0);
+            if (!this.seenBroadcastIds.has(bc.id)) {
+                this.seenBroadcastIds.add(bc.id);
+                this.saveSeenBroadcastIds();
+                if (!isHistoryPull || ageMs < 25000) {
+                    this.launchFloatingBroadcast(bc.text);
+                }
+            }
+            return;
+        }
+
+        // 2. 处理管理员备注更新包
+        if (packet.packetType === "admin_note") {
+            const { clientKey, nickname } = packet;
+            if (clientKey) {
+                this.adminDb.clientNotes[clientKey] = nickname || "";
+                if (this.adminDb.clients[clientKey]) {
+                    this.adminDb.clients[clientKey].nickname = nickname || "";
+                }
+                this.savePermanentAdminDb();
+                if (document.getElementById("adminDashboardModal")?.style.display !== "none") {
+                    this.renderAdminTables();
+                }
+            }
+            return;
+        }
+
+        // 3. 处理客户端做题实时状态与交卷数据包
+        if (packet.packetType === "telemetry") {
+            const c = packet.clientState;
+            if (c && c.clientKey) {
+                const prev = this.adminDb.clients[c.clientKey] || {};
+                // 保持最新的状态时间戳
+                if (!prev.lastSeen || (c.lastSeen >= prev.lastSeen)) {
+                    const savedNote = this.adminDb.clientNotes[c.clientKey] || c.nickname || prev.nickname || "";
+                    this.adminDb.clients[c.clientKey] = {
+                        ...prev,
+                        ...c,
+                        firstSeen: prev.firstSeen ? Math.min(prev.firstSeen, c.firstSeen || c.lastSeen) : (c.firstSeen || c.lastSeen),
+                        nickname: savedNote,
+                        totalSubmissions: Math.max(prev.totalSubmissions || 0, c.totalSubmissions || 0),
+                        recentPapers: c.recentPapers && c.recentPapers.length > 0 ? c.recentPapers : (prev.recentPapers || [])
+                    };
+                }
+            }
+
+            if (packet.submission && packet.submission.subId) {
+                this.mergeSubmissions([packet.submission]);
+                const ck = packet.submission.clientKey;
+                if (ck && this.adminDb.clients[ck]) {
+                    const cli = this.adminDb.clients[ck];
+                    const paperSummary = `${packet.submission.quizTitle} (第${packet.submission.round}轮: ${packet.submission.correct}/${packet.submission.total})`;
+                    cli.recentPapers = cli.recentPapers || [];
+                    if (!cli.recentPapers.includes(paperSummary)) {
+                        cli.recentPapers.unshift(paperSummary);
+                        cli.recentPapers = cli.recentPapers.slice(0, 15);
+                    }
+                    // 统计该客户端历史交卷次数
+                    cli.totalSubmissions = this.adminDb.submissions.filter(s => s.clientKey === ck).length;
+                }
+            }
+
+            if (!isHistoryPull) {
+                this.savePermanentAdminDb();
+                if (document.getElementById("adminDashboardModal")?.style.display !== "none") {
+                    this.renderAdminTables();
+                }
+            }
+        }
+    }
+
+    mergeSubmissions(newSubs) {
+        if (!Array.isArray(newSubs) || newSubs.length === 0) return;
+        const existingIds = new Set(this.adminDb.submissions.map(s => s.subId));
+        for (const sub of newSubs) {
+            if (sub && sub.subId && !existingIds.has(sub.subId)) {
+                this.adminDb.submissions.push(sub);
+                existingIds.add(sub.subId);
+            }
+        }
+        // 按交卷时间倒序排列（最新在最前）
+        this.adminDb.submissions.sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+    }
+
+    // ==================== 做题用时、认真度评估与数据上报 ====================
+
+    recordCurrentQuestionTime() {
+        if (this.currentViewId !== "quizView" || !this.activeQuestions.length) return;
+        const q = this.activeQuestions[this.currentIndex];
+        if (!q || !this.questionEnterTime) return;
+        const now = Date.now();
+        const deltaSec = Math.max(0, Math.round((now - this.questionEnterTime) / 1000));
+        if (deltaSec > 0 && deltaSec < 3600) {
+            this.questionTimeSpent[q.id] = (this.questionTimeSpent[q.id] || 0) + deltaSec;
+        }
+        this.questionEnterTime = now;
+    }
+
+    markExpViewed(qId) {
+        if (!this.questionExpViewed[qId]) {
+            this.questionExpViewed[qId] = true;
+            this.instantExpUsedCount = Object.keys(this.questionExpViewed).length;
+        }
+    }
+
+    evaluateSeriousness(answeredCount, totalSec, tabSwitches, expUsedCount, correctCount) {
+        if (answeredCount === 0) {
+            return { label: "⏳ 准备中/未落笔", level: "warn" };
+        }
+        const avgSec = totalSec / Math.max(1, answeredCount);
+        const accuracy = Math.round((correctCount / Math.max(1, answeredCount)) * 100);
+
+        if (answeredCount >= 3 && avgSec < 3.2) {
+            return { label: `🚨 疑似乱点秒选 (${avgSec.toFixed(1)}秒/题)`, level: "bad" };
+        }
+        if (expUsedCount >= Math.max(3, Math.ceil(answeredCount * 0.35))) {
+            return { label: `⚠️ 边看解析边做 (${expUsedCount}题看解析)`, level: "warn" };
+        }
+        if (tabSwitches >= 5) {
+            return { label: `⚠️ 频繁切屏 (${tabSwitches}次切屏)`, level: "warn" };
+        }
+        if (answeredCount >= 5 && avgSec < 6.0 && accuracy < 40) {
+            return { label: `🚨 敷衍快选 (${avgSec.toFixed(1)}秒/题·正确率${accuracy}%)`, level: "bad" };
+        }
+        return { label: `✅ 认真作答 (${avgSec.toFixed(1)}秒/题)`, level: "good" };
+    }
+
+    buildLiveAnswerDetails() {
+        const letters = ["A", "B", "C", "D"];
+        return this.activeQuestions.map((q, idx) => {
+            const chosenIdx = this.userAnswers[q.id];
+            const isJudge = q.type !== "single";
+            const optSymbols = isJudge ? ["√", "×"] : letters;
+            const rightIdx = q.shuffledOptions.findIndex(o => o.isCorrect);
+            const chosenChar = chosenIdx !== undefined ? optSymbols[chosenIdx] : "未答";
+            const rightChar = rightIdx !== -1 ? optSymbols[rightIdx] : "";
+            const isCorrect = chosenIdx !== undefined && Boolean(q.shuffledOptions[chosenIdx]?.isCorrect);
+
+            return {
+                seq: idx + 1,
+                id: q.id,
+                paperName: q.paperName,
+                origNum: q.num,
+                type: q.type === "single" ? "单选" : "判断",
+                chosenChar,
+                rightChar,
+                status: chosenIdx === undefined ? "unanswered" : (isCorrect ? "correct" : "wrong"),
+                spentSec: this.questionTimeSpent[q.id] || 0,
+                viewedExp: Boolean(this.questionExpViewed[q.id])
+            };
+        });
+    }
+
+    async reportTelemetry(eventType = "heartbeat", submissionRecord = null, useBeacon = false) {
+        const now = Date.now();
+        // 对高频普通动作做节流保护（交卷、开始练习、切屏等重要事件立即发送）
+        const importantEvents = ["client_online", "start_quiz", "submit", "tab_switch", "page_unload"];
+        if (!importantEvents.includes(eventType) && (now - this.lastReportTime < 4000)) {
+            return;
+        }
+        this.lastReportTime = now;
+
+        const totalQ = this.activeQuestions.length;
+        const answeredCount = Object.keys(this.userAnswers).length;
+        let correctSoFar = 0;
+        this.activeQuestions.forEach(q => {
+            const cIdx = this.userAnswers[q.id];
+            if (cIdx !== undefined && q.shuffledOptions[cIdx]?.isCorrect) {
+                correctSoFar++;
+            }
+        });
+
+        const quizElapsedSec = this.quizStartTime > 0 ? Math.max(1, Math.round((now - this.quizStartTime) / 1000)) : 0;
+        const avgSecPerQuestion = answeredCount > 0 ? Number((quizElapsedSec / answeredCount).toFixed(1)) : 0;
+        const seriousnessObj = this.evaluateSeriousness(
+            answeredCount,
+            quizElapsedSec,
+            this.sessionTabSwitches,
+            this.instantExpUsedCount,
+            correctSoFar
+        );
+
+        const clientKey = `${this.clientIp}_${this.clientId}`;
+        const liveDetails = this.currentViewId === "quizView" || this.currentViewId === "resultView"
+            ? this.buildLiveAnswerDetails()
+            : [];
+
+        const clientState = {
+            clientKey,
+            ip: this.clientIp,
+            location: this.clientLocation,
+            clientId: this.clientId,
+            nickname: this.adminDb.clientNotes[clientKey] || this.nickname || "",
+            lastSeen: now,
+            currentView: this.currentViewId,
+            quizTitle: this.quizTitle || "未开始试卷",
+            round: this.round,
+            totalQuestions: totalQ,
+            answeredCount,
+            correctSoFar,
+            currentIndex: this.currentIndex + 1,
+            instantExpOn: Boolean(document.getElementById("instantShowExp")?.checked),
+            instantExpUsedCount: this.instantExpUsedCount,
+            quizElapsedSec,
+            avgSecPerQuestion,
+            sessionTabSwitches: this.sessionTabSwitches,
+            seriousnessTag: seriousnessObj.label,
+            seriousnessLevel: seriousnessObj.level,
+            liveAnswerDetails: liveDetails
+        };
+
+        const cloudPacket = {
+            packetType: "telemetry",
+            eventType,
+            clientState,
+            submission: submissionRecord || null
+        };
+
+        // 1. 立即更新本机内存与永久存储
+        this.processIncomingCloudPacket(cloudPacket, false);
+
+        // 2. 发送至跨国云端同步网关 (ntfy.sh)
+        const cloudUrl = `https://ntfy.sh/${GLOBAL_SYNC_CHANNEL}`;
+        const bodyStr = JSON.stringify(cloudPacket);
+        if (useBeacon && navigator.sendBeacon) {
+            try { navigator.sendBeacon(cloudUrl, bodyStr); } catch (e) {}
+        } else {
+            fetch(cloudUrl, {
+                method: "POST",
+                body: bodyStr
+            }).catch(() => {});
+        }
+
+        // 3. 若同时部署了本地/云服务器 server.py，同步上报给 server.py
+        if (this.hasLocalPythonBackend) {
+            fetch("/api/report", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    clientId: this.clientId,
+                    eventType,
+                    state: clientState,
+                    submission: submissionRecord
+                })
+            }).catch(() => {});
+        }
+    }
+
+    // ==================== 顶部飘屏广播渲染与发射逻辑 ====================
+
+    launchFloatingBroadcast(text) {
+        if (!text) return;
+        const container = document.getElementById("danmakuContainer");
+        if (!container) return;
+
+        // 连续飘过 2 波（错开高度与出发时间），确保所有学生都能清楚看见
+        [0, 3200].forEach((delay, waveIdx) => {
+            setTimeout(() => {
+                const el = document.createElement("div");
+                el.className = "danmaku-item";
+                el.style.top = `${12 + (waveIdx * 54) + Math.floor(Math.random() * 14)}px`;
+                el.innerHTML = `<span class="bc-badge">📢 管理员广播</span><span>${this.escapeHtml(text)}</span>`;
+                container.appendChild(el);
+                setTimeout(() => {
+                    if (el.parentNode) el.parentNode.removeChild(el);
+                }, 13500);
+            }, delay);
+        });
+    }
+
+    applyPinnedBroadcast(bcObj) {
+        const bar = document.getElementById("pinnedBroadcastBar");
+        const txt = document.getElementById("pinnedBroadcastText");
+        if (!bar || !txt) return;
+        if (bcObj && bcObj.text) {
+            txt.textContent = `【管理员通知】${bcObj.text}　　　　　【管理员通知】${bcObj.text}`;
+            bar.style.display = "block";
+        } else {
+            bar.style.display = "none";
+            txt.textContent = "";
+        }
+    }
+
+    async sendAdminBroadcast() {
+        const input = document.getElementById("adminBcInput");
+        const modeSel = document.getElementById("adminBcMode");
+        const text = (input?.value || "").trim();
+        const mode = modeSel?.value || "fly";
+
+        if (!text) {
+            alert("请输入要发送的广播内容！");
+            return;
+        }
+
+        const bcObj = {
+            id: "bc_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+            text,
+            mode,
+            createdAt: Date.now()
+        };
+
+        // 本机立即响应展示
+        this.seenBroadcastIds.add(bcObj.id);
+        this.saveSeenBroadcastIds();
+        this.launchFloatingBroadcast(bcObj.text);
+        if (mode === "pin") {
+            this.adminDb.activePinned = bcObj;
+            this.applyPinnedBroadcast(bcObj);
+            this.savePermanentAdminDb();
+        }
+
+        // 推送到跨国云端频道，所有在线电脑秒级同步飘过
+        const packet = {
+            packetType: "broadcast",
+            broadcast: bcObj
+        };
+        try {
+            await fetch(`https://ntfy.sh/${GLOBAL_SYNC_CHANNEL}`, {
+                method: "POST",
+                body: JSON.stringify(packet)
+            });
+        } catch (e) {}
+
+        if (this.hasLocalPythonBackend) {
+            fetch("/api/admin/broadcast", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Admin-Password": ADMIN_DEFAULT_PWD
+                },
+                body: JSON.stringify({ action: "send", text, mode })
+            }).catch(() => {});
+        }
+
+        input.value = "";
+    }
+
+    fillAndSendPreset(presetText) {
+        const input = document.getElementById("adminBcInput");
+        if (input) {
+            input.value = presetText;
+            this.sendAdminBroadcast();
+        }
+    }
+
+    async clearPinnedBroadcast() {
+        this.adminDb.activePinned = null;
+        this.applyPinnedBroadcast(null);
+        this.savePermanentAdminDb();
+
+        const packet = {
+            packetType: "broadcast",
+            broadcast: {
+                id: "bc_clear_" + Date.now(),
+                mode: "clear_pinned",
+                createdAt: Date.now()
+            }
+        };
+        try {
+            await fetch(`https://ntfy.sh/${GLOBAL_SYNC_CHANNEL}`, {
+                method: "POST",
+                body: JSON.stringify(packet)
+            });
+        } catch (e) {}
+
+        if (this.hasLocalPythonBackend) {
+            fetch("/api/admin/broadcast", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Admin-Password": ADMIN_DEFAULT_PWD
+                },
+                body: JSON.stringify({ action: "clear_pinned" })
+            }).catch(() => {});
+        }
+    }
+
+    // ==================== 隐蔽管理员触发器与后台面板 ====================
+
+    handleSecretAdminTrigger() {
+        this.secretClickCount++;
+        if (this.secretClickTimer) clearTimeout(this.secretClickTimer);
+        if (this.secretClickCount >= 5) {
+            this.secretClickCount = 0;
+            this.openAdminTrigger();
+            return;
+        }
+        this.secretClickTimer = setTimeout(() => {
+            this.secretClickCount = 0;
+        }, 2200);
+    }
+
+    openAdminTrigger() {
+        if (this.isAdminAuthenticated) {
+            this.openAdminDashboard();
+            return;
+        }
+        const modal = document.getElementById("adminLoginModal");
+        const input = document.getElementById("adminPwdInput");
+        const err = document.getElementById("adminLoginErr");
+        if (modal && input && err) {
+            err.textContent = "";
+            input.value = "";
+            modal.style.display = "flex";
+            setTimeout(() => input.focus(), 80);
+        }
+    }
+
+    closeAdminLogin() {
+        const modal = document.getElementById("adminLoginModal");
+        if (modal) modal.style.display = "none";
+    }
+
+    verifyAdminPassword() {
+        const input = document.getElementById("adminPwdInput");
+        const err = document.getElementById("adminLoginErr");
+        const val = (input?.value || "").trim();
+        if (val === ADMIN_DEFAULT_PWD) {
+            this.isAdminAuthenticated = true;
+            sessionStorage.setItem("GESP_ADMIN_AUTH", "1");
+            this.closeAdminLogin();
+            this.openAdminDashboard();
+        } else {
+            if (err) err.textContent = "❌ 密码错误，请重新输入！";
+        }
+    }
+
+    async openAdminDashboard() {
+        const modal = document.getElementById("adminDashboardModal");
+        const chTag = document.getElementById("adminSyncChannelText");
+        if (chTag) {
+            chTag.textContent = `本机IP: ${this.getFullIpDisplay(this.clientIp, this.clientLocation)}`;
+        }
+        if (modal) {
+            modal.style.display = "flex";
+        }
+        this.renderAdminTables();
+        await this.pullCloudHistory();
+        this.renderAdminTables();
+    }
+
+    closeAdminDashboard() {
+        const modal = document.getElementById("adminDashboardModal");
+        if (modal) modal.style.display = "none";
+    }
+
+    async manualSyncCloudData() {
+        await this.pullCloudHistory();
+        this.renderAdminTables();
+    }
+
+    switchAdminTab(tab) {
+        this.adminTab = tab;
+        document.getElementById("adminTabClients")?.classList.toggle("active", tab === "clients");
+        document.getElementById("adminTabHistory")?.classList.toggle("active", tab === "history");
+        document.getElementById("adminClientsPanel").style.display = tab === "clients" ? "block" : "none";
+        document.getElementById("adminHistoryPanel").style.display = tab === "history" ? "block" : "none";
+        this.renderAdminTables();
+    }
+
+    formatTime(ts) {
+        if (!ts) return "-";
+        const d = new Date(ts);
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    formatDuration(sec) {
+        const s = Math.max(0, Math.round(sec || 0));
+        if (s < 60) return `${s}秒`;
+        const m = Math.floor(s / 60);
+        const rem = s % 60;
+        return `${m}分${rem}秒`;
+    }
+
+    async editClientNickname(clientKey) {
+        const cur = this.adminDb.clients[clientKey]?.nickname || this.adminDb.clientNotes[clientKey] || "";
+        const next = prompt("请输入该 IP / 电脑的备注名称（例如：学生A - 温哥华）：", cur);
+        if (next === null) return;
+        const cleanNote = next.trim().slice(0, 30);
+        this.adminDb.clientNotes[clientKey] = cleanNote;
+        if (this.adminDb.clients[clientKey]) {
+            this.adminDb.clients[clientKey].nickname = cleanNote;
+        }
+        this.savePermanentAdminDb();
+        this.renderAdminTables();
+
+        // 同步备注到云端
+        try {
+            await fetch(`https://ntfy.sh/${GLOBAL_SYNC_CHANNEL}`, {
+                method: "POST",
+                body: JSON.stringify({
+                    packetType: "admin_note",
+                    clientKey,
+                    nickname: cleanNote
+                })
+            });
+        } catch (e) {}
+    }
+
+    renderAdminTables() {
+        const now = Date.now();
+        const searchKw = (document.getElementById("adminSearchInput")?.value || "").trim().toLowerCase();
+
+        const allClients = Object.values(this.adminDb.clients || {}).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+        const allSubs = this.adminDb.submissions || [];
+
+        // 计算顶部 KPI
+        const onlineCount = allClients.filter(c => (now - (c.lastSeen || 0)) < 65000).length;
+        const unseriousSubCount = allSubs.filter(s => s.seriousnessLevel === "bad" || s.seriousnessLevel === "warn").length;
+
+        document.getElementById("kpiTotalClients").textContent = allClients.length;
+        document.getElementById("kpiOnlineClients").textContent = onlineCount;
+        document.getElementById("kpiTotalSubs").textContent = allSubs.length;
+        document.getElementById("kpiUnseriousCount").textContent = unseriousSubCount;
+
+        document.getElementById("tabCountClients").textContent = allClients.length;
+        document.getElementById("tabCountHistory").textContent = allSubs.length;
+
+        // 1. 渲染各 IP 实时状态总览表
+        const filteredClients = allClients.filter(c => {
+            if (!searchKw) return true;
+            const hay = `${c.ip || ""} ${c.location || ""} ${c.nickname || ""} ${c.quizTitle || ""}`.toLowerCase();
+            return hay.includes(searchKw);
+        });
+
+        const clientsHtml = filteredClients.length === 0
+            ? `<div style="text-align:center; padding:40px; color:var(--text-muted); background:#fff; border-radius:10px;">暂无匹配的 IP 监控记录</div>`
+            : `
+            <table class="monitor-table">
+                <thead>
+                    <tr>
+                        <th>IP 地址 (国家/地区) & 备注</th>
+                        <th>在线状态 / 最后活动</th>
+                        <th>当前所在页面 / 正在做的试卷</th>
+                        <th>当前进度 & 实时正确率</th>
+                        <th>做题用时 / 均耗时</th>
+                        <th>切屏 / 看解析</th>
+                        <th>认真度智能诊断</th>
+                        <th>历史完成试卷</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filteredClients.map(c => {
+                        const isOnline = (now - (c.lastSeen || 0)) < 65000;
+                        const viewMap = {
+                            homeView: "🏠 首页选区",
+                            subZoneView: "📂 试卷列表页",
+                            quizView: "✍️ 正在答题中",
+                            resultView: "📊 交卷结算页"
+                        };
+                        const viewName = viewMap[c.currentView] || "浏览中";
+                        const done = c.answeredCount || 0;
+                        const total = c.totalQuestions || 0;
+                        const right = c.correctSoFar || 0;
+                        const acc = done > 0 ? Math.round((right / done) * 100) : 0;
+                        const sLevel = c.seriousnessLevel || "good";
+                        const tagCls = sLevel === "bad" ? "tag-bad" : (sLevel === "warn" ? "tag-warn" : "tag-good");
+                        const recentList = (c.recentPapers || []).slice(0, 2).map(p => `<div>• ${this.escapeHtml(p)}</div>`).join("") || "<span style='color:#94a3b8;'>暂无交卷</span>";
+
+                        return `
+                            <tr>
+                                <td>
+                                    <div style="font-weight:800; color:#0f172a; font-family:monospace; font-size:0.95rem;">
+                                        ${this.escapeHtml(c.ip || "未知IP")}
+                                    </div>
+                                    ${c.location ? `<div style="font-size:0.78rem; color:#475569;">🌍 ${this.escapeHtml(c.location)}</div>` : ""}
+                                    <div style="margin-top:4px;">
+                                        <span style="font-size:0.8rem; color:#2563eb; font-weight:700;">
+                                            ${c.nickname ? `🏷️ ${this.escapeHtml(c.nickname)}` : ""}
+                                        </span>
+                                        <button class="preset-chip" style="padding:1px 7px; font-size:0.74rem;" onclick="app.editClientNickname('${this.escapeHtml(c.clientKey)}')">
+                                            ${c.nickname ? "改备注" : "+备注"}
+                                        </button>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="tag-pill ${isOnline ? "tag-online" : "tag-offline"}">
+                                        ${isOnline ? "● 在线" : "○ 离线"}
+                                    </span>
+                                    <div style="font-size:0.78rem; color:#64748b; margin-top:4px;">
+                                        ${this.formatTime(c.lastSeen)}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700; color:#1e293b;">${viewName}</div>
+                                    <div style="font-size:0.83rem; color:#2563eb; font-weight:700;">
+                                        ${c.currentView === "quizView" || c.currentView === "resultView"
+                                            ? `${this.escapeHtml(c.quizTitle)} (第${c.round || 1}轮)`
+                                            : "-"}
+                                    </div>
+                                </td>
+                                <td>
+                                    ${total > 0 ? `
+                                        <div style="font-weight:800;">已答 ${done} / ${total} 题</div>
+                                        <div style="font-size:0.8rem; color:${acc >= 60 ? "#16a34a" : "#dc2626"}; font-weight:700;">
+                                            当前答对 ${right} 题 (${acc}%)
+                                        </div>
+                                    ` : "<span style='color:#94a3b8;'>未进入试卷</span>"}
+                                </td>
+                                <td>
+                                    ${c.quizElapsedSec > 0 ? `
+                                        <div style="font-weight:700;">总计 ${this.formatDuration(c.quizElapsedSec)}</div>
+                                        <div style="font-size:0.78rem; color:#64748b;">平均 ${c.avgSecPerQuestion || 0} 秒/题</div>
+                                    ` : "-"}
+                                </td>
+                                <td>
+                                    <div style="font-size:0.82rem;">切屏：<strong>${c.sessionTabSwitches || 0}</strong> 次</div>
+                                    <div style="font-size:0.82rem; color:${c.instantExpUsedCount > 0 ? "#d97706" : "#64748b"};">
+                                        看解析：<strong>${c.instantExpUsedCount || 0}</strong> 题
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="tag-pill ${tagCls}">${this.escapeHtml(c.seriousnessTag || "正常")}</span>
+                                </td>
+                                <td style="font-size:0.78rem; max-width:210px;">
+                                    ${recentList}
+                                </td>
+                                <td>
+                                    <button class="btn btn-outline btn-sm" onclick="app.showLiveClientDetail('${this.escapeHtml(c.clientKey)}')">
+                                        🔍 实时逐题详情
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join("")}
+                </tbody>
+            </table>
+        `;
+        document.getElementById("adminClientsPanel").innerHTML = clientsHtml;
+
+        // 2. 渲染历史交卷详单表
+        const filteredSubs = allSubs.filter(s => {
+            if (!searchKw) return true;
+            const note = this.adminDb.clientNotes[s.clientKey] || s.nickname || "";
+            const hay = `${s.ip || ""} ${s.location || ""} ${note} ${s.quizTitle || ""} ${s.seriousness || ""}`.toLowerCase();
+            return hay.includes(searchKw);
+        });
+
+        const historyHtml = filteredSubs.length === 0
+            ? `<div style="text-align:center; padding:40px; color:var(--text-muted); background:#fff; border-radius:10px;">暂无历史交卷记录（任何电脑完成交卷或提前交卷后将永久保存在此）</div>`
+            : `
+            <table class="monitor-table">
+                <thead>
+                    <tr>
+                        <th>交卷时间</th>
+                        <th>IP 地址 (地区) & 备注</th>
+                        <th>所做试卷名称 & 轮次</th>
+                        <th>作答成绩 / 正确率</th>
+                        <th>总用时 / 平均每题耗时</th>
+                        <th>切屏 / 看解析次数</th>
+                        <th>是否认真作答判定</th>
+                        <th>逐题明细</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filteredSubs.map(s => {
+                        const note = this.adminDb.clientNotes[s.clientKey] || s.nickname || "";
+                        const sLevel = s.seriousnessLevel || "good";
+                        const tagCls = sLevel === "bad" ? "tag-bad" : (sLevel === "warn" ? "tag-warn" : "tag-good");
+                        return `
+                            <tr>
+                                <td style="white-space:nowrap; font-size:0.82rem; color:#475569;">
+                                    ${this.formatTime(s.submittedAt)}
+                                </td>
+                                <td>
+                                    <div style="font-weight:800; font-family:monospace;">${this.escapeHtml(s.ip || "未知IP")}</div>
+                                    ${s.location ? `<div style="font-size:0.76rem; color:#64748b;">🌍 ${this.escapeHtml(s.location)}</div>` : ""}
+                                    ${note ? `<div style="font-size:0.78rem; color:#2563eb; font-weight:700;">🏷️ ${this.escapeHtml(note)}</div>` : ""}
+                                </td>
+                                <td>
+                                    <div style="font-weight:800; color:#0f172a;">${this.escapeHtml(s.quizTitle)}</div>
+                                    <span class="tag-pill" style="background:#dbeafe; color:#1e40af; margin-top:3px;">
+                                        第 ${s.round || 1} 轮 ${s.isEarlySubmit ? "· 提前交卷" : "· 正式交卷"}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div style="font-weight:800; font-size:0.96rem; color:${s.accuracy >= 60 ? "#16a34a" : "#dc2626"};">
+                                        ${s.correct} / ${s.total} 题 (${s.accuracy}%)
+                                    </div>
+                                    <div style="font-size:0.78rem; color:#64748b;">已答 ${s.answered} 题 · 未答 ${s.total - s.answered} 题</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700;">${this.formatDuration(s.durationSec)}</div>
+                                    <div style="font-size:0.78rem; color:#64748b;">平均 ${s.avgSecPerQ} 秒/题</div>
+                                </td>
+                                <td>
+                                    <div style="font-size:0.82rem;">切屏：<strong>${s.tabSwitches || 0}</strong> 次</div>
+                                    <div style="font-size:0.82rem; color:${s.instantExpUsed > 0 ? "#d97706" : "#64748b"};">
+                                        看解析：<strong>${s.instantExpUsed || 0}</strong> 题
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="tag-pill ${tagCls}">${this.escapeHtml(s.seriousness || "正常")}</span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-primary btn-sm" onclick="app.showSubmissionDetail('${this.escapeHtml(s.subId)}')">
+                                        📋 查看全部 ${s.total} 题明细
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join("")}
+                </tbody>
+            </table>
+        `;
+        document.getElementById("adminHistoryPanel").innerHTML = historyHtml;
+    }
+
+    showLiveClientDetail(clientKey) {
+        const c = this.adminDb.clients[clientKey];
+        if (!c) return;
+        const details = c.liveAnswerDetails || [];
+        const title = `🖥️ 实时做题明细 — ${c.ip} ${c.nickname ? `(${c.nickname})` : ""}`;
+        const metaHtml = `
+            <div><strong>当前试卷：</strong>${this.escapeHtml(c.quizTitle || "未开始")}（第 ${c.round || 1} 轮）</div>
+            <div><strong>当前进度：</strong>已答 ${c.answeredCount || 0} / ${c.totalQuestions || 0} 题（答对 ${c.correctSoFar || 0} 题）</div>
+            <div><strong>累计用时：</strong>${this.formatDuration(c.quizElapsedSec)}（均 ${c.avgSecPerQuestion || 0} 秒/题）</div>
+            <div><strong>认真度评估：</strong>${this.escapeHtml(c.seriousnessTag || "-")}</div>
+        `;
+        this.renderDetailModalContent(title, metaHtml, details);
+    }
+
+    showSubmissionDetail(subId) {
+        const s = (this.adminDb.submissions || []).find(item => item.subId === subId);
+        if (!s) return;
+        const note = this.adminDb.clientNotes[s.clientKey] || s.nickname || "";
+        const title = `📜 交卷逐题详单 — ${s.ip} ${note ? `(${note})` : ""}`;
+        const metaHtml = `
+            <div><strong>交卷时间：</strong>${this.formatTime(s.submittedAt)}</div>
+            <div><strong>试卷名称：</strong>${this.escapeHtml(s.quizTitle)}（第 ${s.round || 1} 轮）</div>
+            <div><strong>成绩：</strong>答对 ${s.correct} / ${s.total} 题（正确率 ${s.accuracy}%）</div>
+            <div><strong>总耗时：</strong>${this.formatDuration(s.durationSec)}（平均 ${s.avgSecPerQ} 秒/题）</div>
+            <div><strong>切屏 / 看解析：</strong>切屏 ${s.tabSwitches || 0} 次 ｜ 开启即时解析 ${s.instantExpUsed || 0} 题</div>
+            <div><strong>认真度诊断：</strong>${this.escapeHtml(s.seriousness || "正常")}</div>
+        `;
+        this.renderDetailModalContent(title, metaHtml, s.details || []);
+    }
+
+    renderDetailModalContent(title, metaHtml, details) {
+        document.getElementById("adminDetailTitle").textContent = title;
+        document.getElementById("adminDetailMeta").innerHTML = metaHtml;
+        const bodyEl = document.getElementById("adminDetailBody");
+
+        if (!details || details.length === 0) {
+            bodyEl.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">该客户端当前尚未进入具体试卷或暂无逐题数据。</div>`;
+        } else {
+            bodyEl.innerHTML = `
+                <table class="monitor-table">
+                    <thead>
+                        <tr>
+                            <th>题号</th>
+                            <th>原卷出处与题号</th>
+                            <th>题型</th>
+                            <th>学生选择</th>
+                            <th>正确答案</th>
+                            <th>结果</th>
+                            <th>本题耗时</th>
+                            <th>是否看解析</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${details.map(d => {
+                            const statusBadge = d.status === "correct"
+                                ? `<span class="tag-pill tag-good">✅ 正确</span>`
+                                : (d.status === "wrong"
+                                    ? `<span class="tag-pill tag-bad">❌ 错误</span>`
+                                    : `<span class="tag-pill tag-offline">⚪ 未答</span>`);
+                            const fastWarn = d.status !== "unanswered" && d.spentSec < 2
+                                ? `<span style="color:#dc2626; font-weight:700;"> (${d.spentSec}秒 ⚡秒选)</span>`
+                                : `${d.spentSec || 0} 秒`;
+
+                            return `
+                                <tr>
+                                    <td><strong>第 ${d.seq} 题</strong></td>
+                                    <td>${this.escapeHtml(d.paperName || d.id)} · 第 ${d.origNum} 题</td>
+                                    <td>${this.escapeHtml(d.type)}</td>
+                                    <td style="font-weight:800;">${this.escapeHtml(d.chosenChar)}</td>
+                                    <td style="font-weight:800; color:#15803d;">${this.escapeHtml(d.rightChar)}</td>
+                                    <td>${statusBadge}</td>
+                                    <td>${fastWarn}</td>
+                                    <td>${d.viewedExp ? `<span style="color:#d97706; font-weight:800;">👀 已看解析</span>` : "否"}</td>
+                                </tr>
+                            `;
+                        }).join("")}
+                    </tbody>
+                </table>
+            `;
+        }
+        document.getElementById("adminDetailModal").style.display = "flex";
+    }
+
+    exportMonitorDataCSV() {
+        const subs = this.adminDb.submissions || [];
+        if (subs.length === 0) {
+            alert("当前暂无交卷记录可导出！");
+            return;
+        }
+        const headers = ["交卷时间", "IP地址", "国家地区", "备注", "试卷名称", "轮次", "总题数", "已答题数", "答对题数", "正确率(%)", "总耗时(秒)", "平均每题耗时(秒)", "切屏次数", "偷看解析题数", "认真度诊断"];
+        const rows = subs.map(s => {
+            const note = this.adminDb.clientNotes[s.clientKey] || s.nickname || "";
+            return [
+                this.formatTime(s.submittedAt),
+                s.ip || "",
+                s.location || "",
+                note,
+                s.quizTitle || "",
+                `第${s.round || 1}轮`,
+                s.total || 0,
+                s.answered || 0,
+                s.correct || 0,
+                s.accuracy || 0,
+                s.durationSec || 0,
+                s.avgSecPerQ || 0,
+                s.tabSwitches || 0,
+                s.instantExpUsed || 0,
+                s.seriousness || ""
+            ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",");
+        });
+
+        const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `GESP三级监控做题记录_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    clearAllMonitorData() {
+        if (!confirm("确定要清空本地归档的所有监控记录吗？（此操作不可撤销）")) return;
+        this.adminDb = {
+            clients: {},
+            submissions: [],
+            broadcasts: [],
+            activePinned: null,
+            clientNotes: this.adminDb.clientNotes || {}
+        };
+        this.savePermanentAdminDb();
+        if (this.hasLocalPythonBackend) {
+            fetch("/api/admin/manage", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Admin-Password": ADMIN_DEFAULT_PWD
+                },
+                body: JSON.stringify({ cmd: "clear_all" })
+            }).catch(() => {});
+        }
+        this.renderAdminTables();
+    }
+
+    // ==================== 原有核心练习逻辑（完整保留并埋点） ====================
+
     switchView(viewId) {
+        this.recordCurrentQuestionTime();
+        this.currentViewId = viewId;
         document.querySelectorAll(".view-page").forEach(el => el.classList.remove("active"));
         document.getElementById(viewId).classList.add("active");
         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1412,7 +2603,6 @@ class GESPSystem {
             .replace(/'/g, "&#039;");
     }
 
-    // 提炼不含任何旧选项字母的核心解题推导，用于判断题或单选题顶部思路展示
     cleanCoreText(rawText, isSingle) {
         if (!rawText) return "";
         let text = String(rawText)
@@ -1441,13 +2631,10 @@ class GESPSystem {
             return text;
         }
 
-        // 对于单选题，移除原本混杂在段落中的旧选项字母引用（因为下方已有严格按 A->B->C->D 顺序排列的逐项详解）
         const lines = text.split("\n").filter(line => {
             const t = line.trim();
             if (!t) return false;
-            // 过滤掉旧的逐项列举航（如 "- A 错..."、"1. A：..."、"- 选项A..."）
             if (/^[-•]?\s*(\d+\.\s*)?(只有)?(先看|再看|看|对比)?\s*(选项\s*[A-D]|[A-D]\s*选项|[A-D]\s*[：:\.错对])/i.test(t)) return false;
-            // 过滤掉旧的结尾选字母句（如 "所以选 C"、"因此正确答案是 A"）
             if (/^(所以|因此|故|可见|按原卷|按照原卷|综上所述).*?(选|答案是|答案为)\s*[A-D]/i.test(t)) return false;
             if (/^(题目问的是|题目要求选出|我们逐项|我们来看看|我们逐个)/i.test(t)) return false;
             return true;
@@ -1460,11 +2647,6 @@ class GESPSystem {
         return lines.join("\n").trim();
     }
 
-    /**
-     * 生成结构化详解 HTML：
-     * 1. 单选题：先展示【核心思路与推导】，再严格按照当前随机后的【选项A -> 选项B -> 选项C -> 选项D】顺序逐一解析每个选项！
-     * 2. 判断题：展示清晰完整的判断依据。
-     */
     renderExplanationHtml(q) {
         if (!q) return "";
 
@@ -1478,14 +2660,12 @@ class GESPSystem {
         const correctLetter = correctIdx !== -1 ? letters[correctIdx] : "";
         const coreText = this.cleanCoreText(q.explanation, true);
 
-        // 严格按照当前随机后的 0(A), 1(B), 2(C), 3(D) 顺序生成逐项解析
         const optionItemsHtml = q.shuffledOptions.map((opt, idx) => {
             const curLetter = letters[idx];
             const statusBadge = opt.isCorrect
                 ? `<span style="color:#15803d; font-weight:800;">【正确 ✅】</span>`
                 : `<span style="color:#dc2626; font-weight:800;">【错误 ❌】</span>`;
 
-            // 提取选项简短标题（排除过长代码）
             let optLabel = "";
             if (opt.text && !/^选项\s*[A-D]$/.test(opt.text.trim())) {
                 const cleanT = opt.text.replace(/\s+/g, " ").trim();
@@ -1542,6 +2722,7 @@ class GESPSystem {
     backToHome() {
         this.currentMajorZone = null;
         this.switchView("homeView");
+        this.reportTelemetry("nav_home");
     }
 
     openMajorZone(zoneKey) {
@@ -1608,6 +2789,7 @@ class GESPSystem {
         }
 
         this.switchView("subZoneView");
+        this.reportTelemetry("open_zone");
     }
 
     // ==================== 启动练习与选项随机打乱 ====================
@@ -1626,7 +2808,6 @@ class GESPSystem {
                     optNote: notes[idx] || ""
                 }));
 
-                // 如果最后一个选项是“以上均不对 / 以上都不对”，则打乱前3个选项并将其保持在最后（D选项），保证语境合理
                 const lastOptText = String(tagged[tagged.length - 1]?.text || "").trim();
                 if (/^以上(均|都)不对/.test(lastOptText) && tagged.length === 4) {
                     const firstThree = this.shuffle(tagged.slice(0, 3));
@@ -1635,7 +2816,6 @@ class GESPSystem {
                     shuffledOptions = this.shuffle(tagged);
                 }
 
-                // 如果原选项文字是“选项A/B/C/D”（用于纯代码选项），同步更新为当前随机后的字母
                 shuffledOptions.forEach((opt, newIdx) => {
                     if (/^选项\s*[A-D]$/.test(String(opt.text || "").trim())) {
                         opt.text = `选项 ${letters[newIdx]}`;
@@ -1713,6 +2893,14 @@ class GESPSystem {
         this.userAnswers = {};
         this.currentIndex = 0;
 
+        // 重置本轮认真度监控计时器与指标
+        this.quizStartTime = Date.now();
+        this.questionEnterTime = Date.now();
+        this.questionTimeSpent = {};
+        this.questionExpViewed = {};
+        this.sessionTabSwitches = 0;
+        this.instantExpUsedCount = 0;
+
         const roundBadge = document.getElementById("roundBadge");
         if (roundNumber === 1) {
             roundBadge.textContent = "第 1 轮：正式作答";
@@ -1726,6 +2914,7 @@ class GESPSystem {
         this.switchView("quizView");
         this.renderQuestion();
         this.renderSheet();
+        this.reportTelemetry("start_quiz");
     }
 
     clearSessionData() {
@@ -1734,6 +2923,12 @@ class GESPSystem {
         this.roundResults = [];
         this.wrongQueue = [];
         this.round = 1;
+        this.quizStartTime = 0;
+        this.questionEnterTime = 0;
+        this.questionTimeSpent = {};
+        this.questionExpViewed = {};
+        this.sessionTabSwitches = 0;
+        this.instantExpUsedCount = 0;
     }
 
     exitQuizSession() {
@@ -1763,6 +2958,9 @@ class GESPSystem {
 
         const chosenIdx = this.userAnswers[q.id];
         const instantExp = document.getElementById("instantShowExp").checked && chosenIdx !== undefined;
+        if (instantExp) {
+            this.markExpViewed(q.id);
+        }
         const letters = q.type === "single" ? ["A", "B", "C", "D"] : ["√", "×"];
 
         const optionsHtml = q.shuffledOptions.map((opt, idx) => {
@@ -1822,15 +3020,22 @@ class GESPSystem {
     }
 
     chooseOption(idx) {
+        this.recordCurrentQuestionTime();
         const q = this.activeQuestions[this.currentIndex];
         this.userAnswers[q.id] = idx;
+        if (document.getElementById("instantShowExp").checked) {
+            this.markExpViewed(q.id);
+        }
         this.renderQuestion();
         this.renderSheet();
+        this.reportTelemetry("answer_question");
     }
 
     prevQuestion() {
         if (this.currentIndex > 0) {
+            this.recordCurrentQuestionTime();
             this.currentIndex--;
+            this.questionEnterTime = Date.now();
             this.renderQuestion();
             this.renderSheet();
         }
@@ -1838,14 +3043,18 @@ class GESPSystem {
 
     nextQuestion() {
         if (this.currentIndex < this.activeQuestions.length - 1) {
+            this.recordCurrentQuestionTime();
             this.currentIndex++;
+            this.questionEnterTime = Date.now();
             this.renderQuestion();
             this.renderSheet();
         }
     }
 
     jumpQuestion(idx) {
+        this.recordCurrentQuestionTime();
         this.currentIndex = idx;
+        this.questionEnterTime = Date.now();
         this.renderQuestion();
         this.renderSheet();
     }
@@ -1870,6 +3079,8 @@ class GESPSystem {
             }
         }
 
+        this.recordCurrentQuestionTime();
+
         let correctCount = 0;
         this.wrongQueue = [];
 
@@ -1891,7 +3102,39 @@ class GESPSystem {
             };
         });
 
+        // 构建永久保存的交卷完整记录并立即上报云端
+        const now = Date.now();
+        const durationSec = this.quizStartTime > 0 ? Math.max(1, Math.round((now - this.quizStartTime) / 1000)) : 1;
+        const avgSecPerQ = done > 0 ? Number((durationSec / done).toFixed(1)) : 0;
+        const accuracy = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+        const seriousnessObj = this.evaluateSeriousness(done, durationSec, this.sessionTabSwitches, this.instantExpUsedCount, correctCount);
+        const clientKey = `${this.clientIp}_${this.clientId}`;
+
+        const submissionRecord = {
+            subId: `sub_${now}_${this.clientId.slice(-6)}`,
+            clientKey,
+            ip: this.clientIp,
+            location: this.clientLocation,
+            nickname: this.adminDb.clientNotes[clientKey] || this.nickname || "",
+            submittedAt: now,
+            quizTitle: this.quizTitle,
+            round: this.round,
+            total,
+            answered: done,
+            correct: correctCount,
+            accuracy,
+            durationSec,
+            avgSecPerQ,
+            tabSwitches: this.sessionTabSwitches,
+            instantExpUsed: this.instantExpUsedCount,
+            isEarlySubmit: Boolean(force),
+            seriousness: seriousnessObj.label,
+            seriousnessLevel: seriousnessObj.level,
+            details: this.buildLiveAnswerDetails()
+        };
+
         this.renderResultPage(correctCount, total);
+        this.reportTelemetry("submit", submissionRecord);
     }
 
     renderResultPage(correctCount, total) {
