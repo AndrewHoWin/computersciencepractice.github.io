@@ -11,6 +11,17 @@
     </style>
 </head>
 <body>
+    <!-- ==================== 顶部全站广播飘屏层 (所有电脑同步可见) ==================== -->
+    <div id="pinnedBroadcastBar" class="pinned-broadcast-bar" style="display: none;">
+        <div class="pinned-broadcast-inner">
+            <span class="pinned-tag">📢 管理员公告</span>
+            <div class="pinned-marquee-wrap">
+                <div id="pinnedBroadcastText" class="pinned-marquee-text"></div>
+            </div>
+        </div>
+    </div>
+    <div id="danmakuContainer" class="danmaku-container" aria-hidden="true"></div>
+
     <!-- 顶部导航栏 -->
     <header class="navbar">
         <div class="navbar-inner">
@@ -19,7 +30,8 @@
                 <span class="logo-title">C++ 三级真题练习系统</span>
             </div>
             <div class="navbar-right">
-                <span id="questionCountStatus" class="status-badge">题库检测中...</span>
+                <!-- 隐蔽管理员触发器：连续点击此状态徽章 5 次（或按 Ctrl+Shift+M）即可唤醒管理员密码框 -->
+                <span id="questionCountStatus" class="status-badge" onclick="app.handleSecretAdminTrigger()" title="题库状态">题库检测中...</span>
             </div>
         </div>
     </header>
@@ -166,6 +178,119 @@
         </section>
 
     </main>
+
+    <!-- ==================== 隐藏弹窗 1：管理员密码验证弹窗 ==================== -->
+    <div id="adminLoginModal" class="admin-modal-overlay" style="display: none;">
+        <div class="admin-login-box">
+            <div class="admin-login-header">
+                <h3>🔒 管理员监控中心验证</h3>
+                <button class="admin-close-x" onclick="app.closeAdminLogin()">✕</button>
+            </div>
+            <p class="admin-login-desc">请输入管理员密码进入实时 IP 监控与全站广播系统：</p>
+            <input type="password" id="adminPwdInput" class="admin-input" placeholder="请输入管理员密码..." onkeydown="if(event.key==='Enter') app.verifyAdminPassword()">
+            <div id="adminLoginErr" class="admin-login-err"></div>
+            <div class="admin-login-actions">
+                <button class="btn btn-outline btn-sm" onclick="app.closeAdminLogin()">取消</button>
+                <button class="btn btn-primary btn-sm" onclick="app.verifyAdminPassword()">进入后台 ➔</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 隐藏弹窗 2：管理员监控与广播主控台 ==================== -->
+    <div id="adminDashboardModal" class="admin-modal-overlay" style="display: none;">
+        <div class="admin-dashboard-card">
+            <!-- 顶部栏 -->
+            <div class="admin-dash-topbar">
+                <div class="admin-dash-title-wrap">
+                    <span class="admin-badge-live">● 跨国云端实时同步中</span>
+                    <h2>🛡️ GESP 练习实时 IP 监控与广播后台</h2>
+                    <span id="adminSyncChannelText" class="admin-channel-tag"></span>
+                </div>
+                <div class="admin-dash-actions">
+                    <button class="btn btn-outline btn-sm" onclick="app.manualSyncCloudData()">🔄 立即同步刷新</button>
+                    <button class="btn btn-outline btn-sm" onclick="app.exportMonitorDataCSV()">📥 导出做题记录 (CSV)</button>
+                    <button class="btn btn-outline btn-sm" onclick="app.clearAllMonitorData()">🗑️ 清空记录</button>
+                    <button class="btn btn-danger btn-sm" onclick="app.closeAdminDashboard()">✕ 关闭后台</button>
+                </div>
+            </div>
+
+            <!-- 广播发射台 -->
+            <div class="admin-broadcast-panel">
+                <div class="admin-bc-title">
+                    <strong>📢 发送全站顶部飘屏广播</strong>
+                    <span>（发送后所有正在使用网站的电脑上方都会立刻飘过该讯息）</span>
+                </div>
+                <div class="admin-bc-controls">
+                    <select id="adminBcMode" class="admin-select">
+                        <option value="fly">🚀 顶部飘过弹幕（连续飘过 2 次）</option>
+                        <option value="pin">📌 顶部置顶横幅（持续滚动显示）</option>
+                    </select>
+                    <input type="text" id="adminBcInput" class="admin-input bc-input" placeholder="输入要广播给所有电脑的讯息，例如：请认真审题，不要乱点选项！" onkeydown="if(event.key==='Enter') app.sendAdminBroadcast()">
+                    <button class="btn btn-primary btn-sm" onclick="app.sendAdminBroadcast()">📣 立即发送广播</button>
+                    <button class="btn btn-warning btn-sm" onclick="app.clearPinnedBroadcast()" title="撤下当前置顶的公告">撤下置顶</button>
+                </div>
+                <div class="admin-bc-presets">
+                    <span>快捷广播：</span>
+                    <button class="preset-chip" onclick="app.fillAndSendPreset('⚠️ 请同学们认真读题计算，后台正在实时记录每道题的作答时间与正确率！')">⚠️ 提醒认真做题</button>
+                    <button class="preset-chip" onclick="app.fillAndSendPreset('🚫 严禁一边开启「即时查看解析」一边抄答案，后台有完整记录！')">🚫 禁止偷看解析</button>
+                    <button class="preset-chip" onclick="app.fillAndSendPreset('💡 第一轮交卷后请务必先仔细阅读下方错题详解，再点击重练错题！')">💡 提醒先看错题解析</button>
+                </div>
+            </div>
+
+            <!-- 核心统计卡片 -->
+            <div class="admin-kpi-grid">
+                <div class="admin-kpi-card">
+                    <div class="kpi-label">累计监控 IP / 设备数</div>
+                    <div id="kpiTotalClients" class="kpi-val">0</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="kpi-label">当前在线活动设备</div>
+                    <div id="kpiOnlineClients" class="kpi-val text-success">0</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="kpi-label">累计交卷 / 练习轮次</div>
+                    <div id="kpiTotalSubs" class="kpi-val text-primary">0</div>
+                </div>
+                <div class="admin-kpi-card">
+                    <div class="kpi-label">疑似乱做 / 异常预警次数</div>
+                    <div id="kpiUnseriousCount" class="kpi-val text-danger">0</div>
+                </div>
+            </div>
+
+            <!-- 视图切换标签 -->
+            <div class="admin-tabs-bar">
+                <div class="admin-tabs-left">
+                    <button id="adminTabClients" class="admin-tab-btn active" onclick="app.switchAdminTab('clients')">
+                        🖥️ 各 IP 实时状态与做题总览 (<span id="tabCountClients">0</span>)
+                    </button>
+                    <button id="adminTabHistory" class="admin-tab-btn" onclick="app.switchAdminTab('history')">
+                        📜 全部做题与交卷详单 (<span id="tabCountHistory">0</span>)
+                    </button>
+                </div>
+                <div class="admin-tabs-right">
+                    <input type="text" id="adminSearchInput" class="admin-input admin-search" placeholder="🔍 搜索 IP、地区、备注或试卷名..." oninput="app.renderAdminTables()">
+                </div>
+            </div>
+
+            <!-- 列表内容区 -->
+            <div class="admin-table-container">
+                <div id="adminClientsPanel"></div>
+                <div id="adminHistoryPanel" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 隐藏弹窗 3：单次试卷逐题作答详情弹窗 ==================== -->
+    <div id="adminDetailModal" class="admin-modal-overlay" style="display: none; z-index: 10020;">
+        <div class="admin-detail-card">
+            <div class="admin-login-header">
+                <h3 id="adminDetailTitle">📋 逐题作答详情</h3>
+                <button class="admin-close-x" onclick="document.getElementById('adminDetailModal').style.display='none'">✕</button>
+            </div>
+            <div id="adminDetailMeta" class="admin-detail-meta"></div>
+            <div id="adminDetailBody" class="admin-detail-body"></div>
+        </div>
+    </div>
 
     <!-- 引入题库数据与逻辑脚本 -->
     <script src="questions_data.js"></script>
